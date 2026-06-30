@@ -28,3 +28,7 @@ pypdf                  # fallback extractor
 pyyaml                 # read config/code_cycles.yaml
 tiktoken               # token-aware chunking
 python-dateutil        # code-cycle date math
+
+# --- Dev / tests ---
+pytest                 # offline test suite (chunking, citations, agent, retrieval, cycles)
+httpx                  # FastAPI TestClient (API smoke tests)

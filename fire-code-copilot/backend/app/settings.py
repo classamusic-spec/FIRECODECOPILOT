@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     code_cycles_config: str = "./config/code_cycles.yaml"
     chroma_dir: str = "./data/chroma"
     active_collection: str = "csfsc_2022"            # set per active edition
+    verified_collection: str = "verified_answers"    # marshal-confirmed answers (learning loop)
+    feedback_db: str = "./data/feedback.sqlite"      # 👍/👎 + corrections
+
+    # --- Deep-mode escalation ---
+    # When the reranker is on and the top relevance score is below this, a non-deep "answer"
+    # auto-escalates to DEEP_PROVIDER/DEEP_MODEL (a stronger model) for one retry.
+    deep_escalate_below: float = 0.2
 
     # Generation tuning
     temperature: float = 0.1                         # low for code work
@@ -56,7 +63,7 @@ class Settings(BaseSettings):
     def _anchor_paths(self):
         """Resolve relative path settings against the project root (not the current dir), so
         `./code_books` and `./data` always point at the same place regardless of where you run."""
-        for field in ("code_books_dir", "data_dir", "code_cycles_config", "chroma_dir"):
+        for field in ("code_books_dir", "data_dir", "code_cycles_config", "chroma_dir", "feedback_db"):
             val = Path(getattr(self, field)).expanduser()
             if not val.is_absolute():
                 val = _ROOT / val

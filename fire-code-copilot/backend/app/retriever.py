@@ -21,6 +21,12 @@ def _format(meta: dict, text: str) -> dict:
 
 def retrieve(query: str, *, collection: str | None = None) -> list[dict]:
     """Return the top reranked chunks for `query` from the active edition collection."""
+    return [s.chunk for s in retrieve_scored(query, collection=collection)]
+
+
+def retrieve_scored(query: str, *, collection: str | None = None):
+    """Like retrieve(), but returns the reranked chunks WITH their relevance scores so callers
+    (e.g. the agent's deep-mode hook) can gauge retrieval confidence."""
     coll_name = collection or settings.active_collection
     coll = _client().get_collection(coll_name)
 
@@ -36,8 +42,29 @@ def retrieve(query: str, *, collection: str | None = None) -> list[dict]:
 
     candidates = _merge_amendments(candidates, coll)
 
-    scored = rerank(query, candidates)
-    return [s.chunk for s in scored]
+    # Pull in the marshal's Verified Answer Library (confirmed answers) so they surface, labeled,
+    # on similar questions. This is the compounding "memory" of the learning loop.
+    verified = _verified_matches(query, qvec)
+
+    scored = rerank(query, verified + candidates)
+    return scored
+
+
+def _verified_matches(query: str, qvec: list[float], k: int = 3) -> list[dict]:
+    """Top verified answers similar to the query, labeled so the agent weights them as confirmed."""
+    try:
+        vcoll = _client().get_collection(settings.verified_collection)
+    except Exception:
+        return []  # no verified answers yet
+    try:
+        res = vcoll.query(query_embeddings=[qvec], n_results=k, include=["documents", "metadatas"])
+    except Exception:
+        return []
+    out = []
+    for d, m in zip(res.get("documents", [[]])[0], res.get("metadatas", [[]])[0]):
+        meta = {**(m or {}), "verified": True}
+        out.append(_format(meta, d))
+    return out
 
 
 def _merge_amendments(chunks: list[dict], coll) -> list[dict]:
@@ -48,6 +75,7 @@ def _merge_amendments(chunks: list[dict], coll) -> list[dict]:
     prepend them so the agent sees the controlling text first.
     """
     sections = {c["metadata"].get("section") for c in chunks if c["metadata"].get("section")}
+    sections.discard("(preamble)")          # not a real section — don't merge a doc title as an amendment
     if not sections:
         return chunks
     try:

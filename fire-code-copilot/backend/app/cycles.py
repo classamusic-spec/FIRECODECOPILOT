@@ -2,13 +2,21 @@
 prompt, and computes whether a 'new code cycle due' reminder should fire."""
 from __future__ import annotations
 from datetime import date, datetime
+from pathlib import Path
 import yaml
 from .settings import settings
 
 
 def _load() -> dict:
-    with open(settings.code_cycles_config, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """Load the finalized code_cycles.yaml; if the marshal hasn't created it yet, fall back to
+    the committed .example so the app still runs (with VERIFY-me placeholder editions)."""
+    path = Path(settings.code_cycles_config)
+    if not path.exists():
+        example = path.with_name("code_cycles.example.yaml")
+        if example.exists():
+            path = example
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def active_cycle_block() -> str:
