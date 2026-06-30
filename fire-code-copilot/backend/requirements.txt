@@ -9,6 +9,8 @@ pydantic-settings
 python-dotenv
 
 # --- LLM + embeddings ---
+# To run an open-source model DIRECTLY (a .gguf via llama.cpp, or MLX on Apple Silicon),
+# see requirements-local-llm.txt — those deps are optional and intentionally kept out of here.
 anthropic              # Claude API (optional escalation only)
 openai                 # talk to local OpenAI-compatible servers (LM Studio / mlx_lm.server / Ollama)
 voyageai               # Voyage embeddings (optional; local is default)

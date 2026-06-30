@@ -1,0 +1,15 @@
+# Fire Code CoPilot — OPTIONAL deps for running an open-source LLM directly (no server).
+# These are NOT needed for the core app and are NOT in requirements.txt. Install only the
+# one matching your setup:
+#     pip install -r requirements-local-llm.txt
+# (or just install the single package you need — see below.)
+
+# --- GENERATION_PROVIDER=llamacpp : load a .gguf file directly via llama.cpp ---
+# Needs a C/C++ compiler. CPU-only by default. For GPU acceleration, set CMAKE_ARGS before install:
+#     CMAKE_ARGS="-DLLAMA_METAL=on"   pip install llama-cpp-python   # Apple Silicon (Metal)
+#     CMAKE_ARGS="-DLLAMA_CUBLAS=on"  pip install llama-cpp-python   # NVIDIA (CUDA)
+llama-cpp-python
+
+# --- GENERATION_PROVIDER=mlx : load an MLX model directly (Apple Silicon ONLY) ---
+# mlx-lm only runs on Apple Silicon (M-series). It is a no-op / unavailable elsewhere.
+mlx-lm

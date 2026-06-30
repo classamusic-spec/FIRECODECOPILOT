@@ -91,6 +91,67 @@ resp = client.chat.completions.create(
 Keep `agent.py` provider-agnostic: an `anthropic` path and a `local` (OpenAI-compatible) path
 behind one interface, selected by `GENERATION_PROVIDER`.
 
+## Three ways to run an open-source model
+
+`GENERATION_PROVIDER` now accepts four values: `local`, `llamacpp`, `mlx`, `anthropic`.
+The `llamacpp` and `mlx` providers load a model file **directly in-process** (no server). Their
+deps are optional and live in `backend/requirements-local-llm.txt` (NOT in the core install).
+
+Check your configuration any time — this never needs the heavy deps and never runs inference:
+```bash
+cd backend && python -m app.llm --check
+```
+
+### (a) Via a server — `local` (LM Studio / Ollama / llama.cpp server) — *recommended, easiest*
+Run any OpenAI-compatible server and point the app at it. Nothing extra to install (the core
+`openai` client is already a dependency).
+```bash
+# pick ONE server:
+#   LM Studio   -> load a model, click "Start Server" (defaults to :1234)
+#   Ollama      -> `ollama serve` then `ollama run <model>`  (base url http://localhost:11434/v1)
+#   llama.cpp   -> `llama-server -m model.gguf --port 1234`
+```
+```
+GENERATION_PROVIDER=local
+LOCAL_BASE_URL=http://localhost:1234/v1
+LOCAL_MODEL=glm-5.2
+```
+
+### (b) A downloaded GGUF — `llamacpp` (cross-platform, CPU or GPU)
+Loads a `.gguf` file directly with `llama-cpp-python` — no server process.
+
+1. **Get a GGUF.** Download a quantized `.gguf` from Hugging Face (search the
+   *"…-GGUF"* repos, e.g. `bartowski/...` or `Qwen/...-GGUF`). A `Q4_K_M` quant is a good
+   size/quality balance. Save it somewhere like `backend/models/`.
+2. **Install the runtime** (needs a C/C++ compiler; add GPU flags for acceleration):
+   ```bash
+   pip install llama-cpp-python                                              # CPU only
+   CMAKE_ARGS="-DLLAMA_METAL=on"  pip install llama-cpp-python               # Apple Silicon (Metal)
+   CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python               # NVIDIA (CUDA)
+   ```
+3. **Point the app at the file** (`.env`):
+   ```
+   GENERATION_PROVIDER=llamacpp
+   GGUF_MODEL_PATH=./models/qwen2.5-7b-instruct-q4_k_m.gguf   # relative paths anchor to project root
+   GGUF_N_CTX=8192                                            # context window
+   GGUF_N_GPU_LAYERS=-1                                       # -1 = offload all to GPU; 0 = CPU only
+   ```
+The model loads once (cached for the process). `python -m app.llm --check` confirms the dep is
+importable and the file exists.
+
+### (c) MLX — `mlx` (Apple Silicon only, fastest on Mac)
+Loads an MLX model directly with `mlx_lm` — no server.
+
+1. **Install** (Apple Silicon only): `pip install mlx-lm`
+2. **Pick a model** from the `mlx-community` org on Hugging Face (the id is downloaded on first
+   use), or use a local path.
+3. **Configure** (`.env`):
+   ```
+   GENERATION_PROVIDER=mlx
+   MLX_MODEL=mlx-community/Qwen2.5-7B-Instruct-4bit   # HF repo id OR a local path
+   ```
+The model loads once and uses the tokenizer's chat template when available.
+
 ## The anti-hallucination pipeline (do all four)
 
 1. **Two-stage retrieval.** Embed query → retrieve top ~20 (recall) → **cross-encoder

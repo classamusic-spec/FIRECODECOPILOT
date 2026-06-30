@@ -15,12 +15,23 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(_ROOT / ".env"), extra="ignore")
 
     # --- Generation ---
-    # "local" = OpenAI-compatible server (LM Studio / mlx_lm.server / Ollama). "anthropic" = Claude API.
+    # "local"    = OpenAI-compatible server (LM Studio / mlx_lm.server / Ollama)
+    # "llamacpp" = a local .gguf file loaded directly via llama-cpp-python
+    # "mlx"      = an MLX model loaded directly via mlx_lm (Apple Silicon only)
+    # "anthropic"= Claude API
     generation_provider: str = "local"
     local_base_url: str = "http://localhost:1234/v1"
     local_model: str = "glm-5.2"
     anthropic_api_key: str = ""
     answer_model: str = "claude-sonnet-4-6"          # only used if provider == anthropic
+
+    # --- llamacpp provider (direct .gguf via llama-cpp-python) ---
+    gguf_model_path: str = ""                        # path to a .gguf file (relative paths anchored to root)
+    gguf_n_ctx: int = 8192                           # context window the model is loaded with
+    gguf_n_gpu_layers: int = -1                      # layers to offload to GPU; -1 = offload all if possible
+
+    # --- mlx provider (direct MLX model via mlx_lm; Apple Silicon only) ---
+    mlx_model: str = ""                              # HF repo id (e.g. mlx-community/...) or local path
 
     # Optional escalation for hard questions (kept local by default).
     deep_provider: str = "local"
@@ -63,8 +74,15 @@ class Settings(BaseSettings):
     def _anchor_paths(self):
         """Resolve relative path settings against the project root (not the current dir), so
         `./code_books` and `./data` always point at the same place regardless of where you run."""
-        for field in ("code_books_dir", "data_dir", "code_cycles_config", "chroma_dir", "feedback_db"):
-            val = Path(getattr(self, field)).expanduser()
+        # gguf_model_path is a real file path -> anchor it. mlx_model is intentionally NOT here:
+        # it may be a HF repo id (e.g. "mlx-community/...") which must never be path-anchored.
+        anchored = ("code_books_dir", "data_dir", "code_cycles_config", "chroma_dir", "feedback_db",
+                    "gguf_model_path")
+        for field in anchored:
+            raw = getattr(self, field)
+            if not raw:            # empty (e.g. unset gguf path) — leave as-is, don't anchor "" to root
+                continue
+            val = Path(raw).expanduser()
             if not val.is_absolute():
                 val = _ROOT / val
             setattr(self, field, str(val))
