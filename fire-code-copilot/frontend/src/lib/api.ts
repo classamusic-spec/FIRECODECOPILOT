@@ -7,6 +7,7 @@
  * Base URL comes from VITE_API_BASE (default http://localhost:8000). The backend
  * sets permissive CORS, so the browser calls it directly.
  */
+import { DEMO, demoApi } from "../demo";
 
 // Resolve the API base once. import.meta.env values are strings (or undefined).
 export const API_BASE: string =
@@ -162,33 +163,41 @@ function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 /* ----------------------------------------------------------------- Calls -- */
+// In demo/showcase mode (?demo or VITE_DEMO=1) every call resolves to canned
+// content so the full UI renders with no backend (see demo.ts).
 
 /** Ask a code question. */
 export function ask(body: AskRequest): Promise<AskResponse> {
+  if (DEMO) return demoApi.ask();
   return post<AskResponse>("/ask", body);
 }
 
 /** Continue a thread after the marshal answers clarifying questions. */
 export function clarify(body: ClarifyRequest): Promise<AskResponse> {
+  if (DEMO) return demoApi.clarify();
   return post<AskResponse>("/clarify", body);
 }
 
 /** Send 👍/👎 feedback (optionally with a correction note). */
 export function sendFeedback(body: FeedbackRequest): Promise<FeedbackResponse> {
+  if (DEMO) return demoApi.feedback();
   return post<FeedbackResponse>("/feedback", body);
 }
 
 /** Promote a corrected answer into the Verified Answer Library. */
 export function verifyAnswer(body: VerifyRequest): Promise<VerifyResponse> {
+  if (DEMO) return demoApi.verify();
   return post<VerifyResponse>("/verify", body);
 }
 
 /** Current adopted cycle + any "new edition due" reminder. */
 export function getCycleStatus(): Promise<CycleStatus> {
+  if (DEMO) return demoApi.cycle();
   return request<CycleStatus>("/cycle-status");
 }
 
 /** Backend health + jurisdiction/provider/model identity. */
 export function getHealth(): Promise<Health> {
+  if (DEMO) return demoApi.health();
   return request<Health>("/health");
 }

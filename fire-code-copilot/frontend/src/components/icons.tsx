@@ -77,3 +77,40 @@ export const CheckIcon = (p: IconProps) => (
     <polyline points="20 6 9 17 4 12" />
   </svg>
 );
+
+export const SparkIcon = (p: IconProps) => (
+  // A four-point "deep mode" spark.
+  <svg {...base(p)}>
+    <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+    <path d="M12 8a4 4 0 0 0 0 8 4 4 0 0 0 0-8z" />
+  </svg>
+);
+
+export const ShieldIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+
+/**
+ * BrandMark — a flame inside a shield, the app's identity. Uses fill (not the
+ * stroke base) so it reads as a solid coral glyph. Pass a className for size.
+ */
+export const BrandMark = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" aria-hidden width={24} height={24} {...p}>
+    {/* shield outline */}
+    <path
+      d="M12 2.2 4.5 5v6.4c0 5 3.4 8 7.5 10.4 4.1-2.4 7.5-5.4 7.5-10.4V5L12 2.2z"
+      fill="currentColor"
+      fillOpacity="0.16"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+    {/* flame */}
+    <path
+      d="M12 7c.7 1.5 2.6 2.3 2.6 4.6A2.7 2.7 0 0 1 12 14.3a2.7 2.7 0 0 1-2.6-2.7c0-.9.4-1.5.8-2 .2.5.5.8.9 1 .1-1 .4-2.1.9-3.6z"
+      fill="currentColor"
+    />
+  </svg>
+);

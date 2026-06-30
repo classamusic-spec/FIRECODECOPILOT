@@ -3,12 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#05090f" />
     <meta
       name="description"
       content="Fire Code CoPilot — local-first code research assistant for the Hartford, CT fire marshal."
     />
     <title>Fire Code CoPilot</title>
+    <style>
+      /* Paint the navy canvas immediately to avoid a white flash before CSS loads. */
+      html, body, #root { background-color: #05090f; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

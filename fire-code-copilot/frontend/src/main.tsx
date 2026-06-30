@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import "@fontsource-variable/inter"; // self-hosted Inter (no runtime web-font fetch)
 import App from "./App";
 import "./index.css";
 

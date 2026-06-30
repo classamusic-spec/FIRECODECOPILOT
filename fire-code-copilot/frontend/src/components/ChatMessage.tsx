@@ -17,7 +17,7 @@ import type { Turn } from "../lib/types";
 import SourceCitation from "./SourceCitation";
 import FeedbackBar from "./FeedbackBar";
 import ClarifyingChips from "./ClarifyingChips";
-import { WarningIcon } from "./icons";
+import { WarningIcon, SparkIcon } from "./icons";
 
 interface Props {
   turn: Turn;
@@ -28,15 +28,11 @@ interface Props {
 /** Three-dot pulse used while an answer is generating. */
 function LoadingDots() {
   return (
-    <div
-      className="flex items-center gap-1.5 text-ink-faint"
-      role="status"
-      aria-label="Generating answer"
-    >
+    <div className="flex items-center gap-1.5 text-coral-400" role="status" aria-label="Generating answer">
       <span className="h-2 w-2 animate-blink rounded-full bg-current [animation-delay:0ms]" />
       <span className="h-2 w-2 animate-blink rounded-full bg-current [animation-delay:200ms]" />
       <span className="h-2 w-2 animate-blink rounded-full bg-current [animation-delay:400ms]" />
-      <span className="ml-1 text-xs">Researching your code books…</span>
+      <span className="ml-1 text-xs text-steel-400">Researching your code books…</span>
     </div>
   );
 }
@@ -46,7 +42,7 @@ export default function ChatMessage({ turn, onClarify }: Props) {
   if (turn.role === "user") {
     return (
       <div className="flex justify-end animate-rise">
-        <div className="max-w-prose whitespace-pre-wrap rounded-2xl rounded-br-sm bg-slate-900 px-4 py-2.5 text-[15px] leading-relaxed text-white">
+        <div className="max-w-prose whitespace-pre-wrap rounded-2xl rounded-br-md bg-coral-500 px-4 py-2.5 text-[15px] leading-relaxed text-white shadow-glow-sm">
           {turn.text}
         </div>
       </div>
@@ -58,7 +54,7 @@ export default function ChatMessage({ turn, onClarify }: Props) {
 
   return (
     <div className="animate-rise">
-      <div className="max-w-prose rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="glass max-w-prose px-4 py-3.5">
         {/* Loading */}
         {status === "loading" && <LoadingDots />}
 
@@ -67,8 +63,8 @@ export default function ChatMessage({ turn, onClarify }: Props) {
           <div className="flex items-start gap-2 text-sm text-critical-700">
             <WarningIcon className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p className="font-semibold">Something went wrong.</p>
-              <p className="mt-0.5 text-critical-600">{error}</p>
+              <p className="font-semibold text-critical-600">Something went wrong.</p>
+              <p className="mt-0.5 text-steel-300">{error}</p>
             </div>
           </div>
         )}
@@ -76,7 +72,6 @@ export default function ChatMessage({ turn, onClarify }: Props) {
         {/* Resolved response */}
         {status === "done" && response && (
           <>
-            {/* Clarification path: render chips instead of an answer. */}
             {response.needs_clarification ? (
               <ClarifyingChips
                 questions={response.clarifying_questions}
@@ -86,53 +81,44 @@ export default function ChatMessage({ turn, onClarify }: Props) {
               />
             ) : (
               <>
-                {/* "Deep mode" tag when the backend escalated to the stronger model. */}
                 {response.escalated && (
-                  <div className="mb-2">
-                    <span className="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-                      Deep mode
+                  <div className="mb-2.5">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-coral-500/30 bg-coral-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-coral-300">
+                      <SparkIcon className="h-3 w-3" /> Deep mode
                     </span>
                   </div>
                 )}
 
-                {/* Prominent amber warning when citations could not be verified. */}
+                {/* Prominent coral warning when citations could not be verified. */}
                 {!response.citations_ok && (
-                  <div
-                    role="alert"
-                    className="mb-3 rounded-md border border-safety-200 bg-safety-50 px-3 py-2.5 text-sm"
-                  >
-                    <div className="flex items-center gap-2 font-semibold text-safety-700">
+                  <div role="alert" className="mb-3 rounded-xl border border-coral-500/40 bg-coral-500/10 px-3 py-2.5 text-sm">
+                    <div className="flex items-center gap-2 font-semibold text-coral-200">
                       <WarningIcon className="h-4 w-4" />
                       Unverified citations — confirm before relying on this
                     </div>
                     {response.unverified.length > 0 && (
-                      <ul className="mt-1.5 list-disc space-y-0.5 pl-8 text-safety-900">
+                      <ul className="mt-1.5 list-disc space-y-0.5 pl-8 text-coral-200/90">
                         {response.unverified.map((u, i) => (
-                          <li key={i} className="font-mono text-xs">
-                            {u}
-                          </li>
+                          <li key={i} className="font-mono text-xs">{u}</li>
                         ))}
                       </ul>
                     )}
                   </div>
                 )}
 
-                {/* The answer body, rendered as markdown. */}
                 {response.answer ? (
                   <div className="answer-prose">
                     <ReactMarkdown>{response.answer}</ReactMarkdown>
                   </div>
                 ) : (
-                  <p className="text-sm italic text-ink-muted">
-                    No answer was returned for this question.
-                  </p>
+                  <p className="text-sm italic text-steel-400">No answer was returned for this question.</p>
                 )}
 
-                {/* Source citations. */}
                 {response.sources.length > 0 && (
                   <div className="mt-4">
-                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
-                      Sources ({response.sources.length})
+                    <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-steel-500">
+                      Sources
+                      <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-steel-300">{response.sources.length}</span>
                     </p>
                     <div className="space-y-1.5">
                       {response.sources.map((s, i) => (
@@ -142,7 +128,6 @@ export default function ChatMessage({ turn, onClarify }: Props) {
                   </div>
                 )}
 
-                {/* Feedback loop — only meaningful once there's an answer. */}
                 {response.answer && (
                   <FeedbackBar
                     question={turn.question}

@@ -115,10 +115,10 @@ export default function FeedbackBar({
   }
 
   const ratingBtn =
-    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors";
+    "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors";
 
   return (
-    <div className="mt-3 border-t border-slate-200/70 pt-3">
+    <div className="mt-4 border-t border-white/10 pt-3">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -128,8 +128,8 @@ export default function FeedbackBar({
           className={
             ratingBtn +
             (rated === "up"
-              ? " border-emerald-300 bg-emerald-50 text-emerald-700"
-              : " border-slate-200 text-ink-muted hover:bg-slate-50")
+              ? " border-verified-500/40 bg-verified-500/15 text-verified-700"
+              : " border-white/10 bg-white/[0.03] text-steel-400 hover:text-steel-200")
           }
         >
           <ThumbUpIcon className="h-3.5 w-3.5" />
@@ -144,8 +144,8 @@ export default function FeedbackBar({
           className={
             ratingBtn +
             (rated === "down"
-              ? " border-critical-200 bg-critical-50 text-critical-700"
-              : " border-slate-200 text-ink-muted hover:bg-slate-50")
+              ? " border-critical-200 bg-critical-600/15 text-critical-600"
+              : " border-white/10 bg-white/[0.03] text-steel-400 hover:text-steel-200")
           }
         >
           <ThumbDownIcon className="h-3.5 w-3.5" />
@@ -156,13 +156,13 @@ export default function FeedbackBar({
           type="button"
           onClick={() => setShowCorrection((v) => !v)}
           aria-expanded={showCorrection}
-          className="ml-1 text-xs font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900"
+          className="ml-1 text-xs font-medium text-coral-300 underline decoration-coral-500/40 underline-offset-2 hover:text-coral-200"
         >
           {showCorrection ? "Hide correction" : "Correct this"}
         </button>
 
         {confirm && (
-          <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
+          <span className="inline-flex items-center gap-1 text-xs text-verified-700">
             <CheckIcon className="h-3.5 w-3.5" />
             {confirm}
           </span>
@@ -172,12 +172,8 @@ export default function FeedbackBar({
       {/* Collapsible correction editor + "save as verified" path. */}
       {showCorrection && (
         <div className="mt-3 space-y-2">
-          <label
-            htmlFor={`correct-${question.length}`}
-            className="block text-xs font-medium text-ink-muted"
-          >
-            Provide the correct answer or note. You can also promote it to the
-            Verified Answer Library.
+          <label htmlFor={`correct-${question.length}`} className="block text-[11px] font-semibold uppercase tracking-wider text-steel-400">
+            Provide the correct answer or note — you can also promote it to the Verified Answer Library.
           </label>
           <textarea
             id={`correct-${question.length}`}
@@ -185,14 +181,14 @@ export default function FeedbackBar({
             onChange={(e) => setCorrection(e.target.value)}
             rows={4}
             placeholder="e.g. Per CT amendment to IFC §903.2.8, an existing Group R-2 requires sprinklers when…"
-            className="scroll-thin w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-slate-400"
+            className="scroll-thin w-full resize-y rounded-lg border border-white/10 bg-navy-950/60 px-3 py-2 text-sm text-steel-100 placeholder:text-steel-500 focus:border-coral-500/50"
           />
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={submitCorrection}
               disabled={busy || !correction.trim()}
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-steel-700 px-3 py-1.5 text-xs font-semibold text-steel-100 transition-colors hover:bg-steel-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Submit correction
             </button>
@@ -200,12 +196,12 @@ export default function FeedbackBar({
               type="button"
               onClick={saveVerified}
               disabled={busy || !correction.trim()}
-              className="rounded-md border border-safety-600 bg-safety-50 px-3 py-1.5 text-xs font-semibold text-safety-700 transition-colors hover:bg-safety-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-coral-500/50 bg-coral-500/10 px-3 py-1.5 text-xs font-semibold text-coral-200 transition-colors hover:bg-coral-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Save as verified answer
             </button>
             {verifiedNote && (
-              <span className="inline-flex items-center gap-1 text-xs text-safety-700">
+              <span className="inline-flex items-center gap-1 text-xs text-coral-200">
                 <CheckIcon className="h-3.5 w-3.5" />
                 {verifiedNote}
               </span>
@@ -215,9 +211,7 @@ export default function FeedbackBar({
       )}
 
       {error && (
-        <p className="mt-2 text-xs text-critical-700" role="alert">
-          {error}
-        </p>
+        <p className="mt-2 text-xs text-critical-600" role="alert">{error}</p>
       )}
     </div>
   );

@@ -41,10 +41,12 @@ export default function SourceCitation({ source, index }: Props) {
   return (
     <div
       className={
-        "rounded-md border text-sm transition-colors " +
+        "overflow-hidden rounded-xl border text-sm transition-colors " +
         (isAmendment
-          ? "border-safety-200 bg-safety-50"
-          : "border-slate-200 bg-white")
+          ? "border-coral-500/40 bg-coral-500/[0.07]"
+          : meta.verified
+            ? "border-verified-500/30 bg-verified-500/[0.06]"
+            : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]")
       }
     >
       {/* Header row: click to expand/collapse the quoted text. */}
@@ -54,34 +56,21 @@ export default function SourceCitation({ source, index }: Props) {
         aria-expanded={open}
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
       >
-        <ChevronIcon
-          className={
-            "shrink-0 text-ink-faint transition-transform " +
-            (open ? "rotate-90" : "")
-          }
-        />
-        <span className="shrink-0 font-mono text-xs text-ink-faint">
-          [{index}]
-        </span>
-        <span className="truncate font-medium text-ink">
-          {referenceLine(meta)}
-        </span>
+        <ChevronIcon className={"shrink-0 text-steel-500 transition-transform " + (open ? "rotate-90" : "")} />
+        <span className="shrink-0 font-mono text-xs text-steel-500">[{index}]</span>
+        <span className="truncate font-medium text-steel-100">{referenceLine(meta)}</span>
 
         {/* Status badges, pushed to the right. */}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {meta.is_table && (
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-              Table
-            </span>
+            <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-steel-300">Table</span>
           )}
           {meta.verified && (
-            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-              Verified
-            </span>
+            <span className="rounded-full border border-verified-500/30 bg-verified-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-verified-700">Verified</span>
           )}
           {isAmendment && (
-            <span className="rounded bg-safety-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-              CT Amendment — controlling
+            <span className="rounded-full bg-coral-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-glow-sm">
+              CT Amendment · controlling
             </span>
           )}
         </span>
@@ -89,8 +78,8 @@ export default function SourceCitation({ source, index }: Props) {
 
       {/* Quoted source text — monospace, scrollable, verbatim from the code book. */}
       {open && (
-        <div className="border-t border-slate-200/80 px-3 py-2">
-          <pre className="scroll-thin max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-ink-muted">
+        <div className="border-t border-white/10 bg-navy-950/50 px-3 py-2.5">
+          <pre className="scroll-thin max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-steel-300">
             {source.text}
           </pre>
         </div>
