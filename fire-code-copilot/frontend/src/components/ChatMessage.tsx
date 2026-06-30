@@ -55,8 +55,23 @@ export default function ChatMessage({ turn, onClarify }: Props) {
   return (
     <div className="animate-rise">
       <div className="glass max-w-prose px-4 py-3.5">
-        {/* Loading */}
+        {/* Loading (request open, no tokens yet) */}
         {status === "loading" && <LoadingDots />}
+
+        {/* Streaming: render accumulated tokens live, with a blinking caret.
+            Until the first token lands we still show the LoadingDots. */}
+        {status === "streaming" &&
+          (turn.streamText ? (
+            <div className="answer-prose">
+              <ReactMarkdown>{turn.streamText}</ReactMarkdown>
+              <span
+                className="ml-0.5 inline-block h-4 w-[2px] -translate-y-px animate-blink bg-coral-400 align-middle"
+                aria-hidden="true"
+              />
+            </div>
+          ) : (
+            <LoadingDots />
+          ))}
 
         {/* Error */}
         {status === "error" && (

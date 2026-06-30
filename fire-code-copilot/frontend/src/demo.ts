@@ -7,7 +7,7 @@
  * and for sharing a clickable preview. NONE of this is real legal text; the answer is
  * illustrative and the citations are synthetic.
  */
-import type { AskResponse, CycleStatus, Health, ReviewItem, Source } from "./lib/api";
+import type { AskResponse, CycleStatus, Health, ReviewItem, Source, StreamHandlers } from "./lib/api";
 
 const params = new URLSearchParams(
   typeof window !== "undefined" ? window.location.search : "",
@@ -197,9 +197,41 @@ export const demoReview: ReviewItem[] = [
 const delay = <T>(v: T, ms = 550): Promise<T> =>
   new Promise((r) => setTimeout(() => r(v), ms));
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Simulate the real /ask/stream event order offline so the demo answer animates
+ * in token-by-token. Clarify variant emits a single onClarify; otherwise it dribbles
+ * the canned answer out as word chunks, then finalizes with onMeta.
+ */
+async function demoStream(h: StreamHandlers): Promise<void> {
+  if (DEMO_VARIANT === "clarify") {
+    await sleep(450);
+    h.onClarify(demoClarify.clarifying_questions, demoClarify.chips, false);
+    return;
+  }
+
+  await sleep(250);
+  // Split on whitespace but KEEP the trailing space on each chunk so reassembly
+  // (concatenation) reproduces the original answer exactly.
+  const chunks = (demoAnswer.answer ?? "").match(/\S+\s*/g) ?? [];
+  for (const chunk of chunks) {
+    h.onToken(chunk);
+    await sleep(25 + Math.random() * 15); // ~25–40ms, to look like real streaming
+  }
+  h.onMeta({
+    sources: demoAnswer.sources,
+    citations_ok: true,
+    unverified: [],
+    answer_suffix: "",
+    escalated: demoAnswer.escalated,
+  });
+}
+
 /** Network short-circuits used by lib/api when DEMO is on. */
 export const demoApi = {
   ask: () => delay(DEMO_VARIANT === "clarify" ? demoClarify : demoAnswer),
+  stream: (h: StreamHandlers) => demoStream(h),
   clarify: () => delay(demoClarifyResolved),
   health: () => delay(demoHealth, 120),
   cycle: () => delay(demoCycle, 120),

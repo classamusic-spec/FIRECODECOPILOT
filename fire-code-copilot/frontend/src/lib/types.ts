@@ -20,8 +20,13 @@ export interface UserTurn {
 export interface AssistantTurn {
   id: string;
   role: "assistant";
-  /** lifecycle: thinking -> done | error (clarifying is a sub-state of done) */
-  status: "loading" | "done" | "error";
+  /**
+   * lifecycle: loading (request open, no tokens yet) -> streaming (tokens
+   * arriving) -> done | error. (clarifying is a sub-state of done.)
+   */
+  status: "loading" | "streaming" | "done" | "error";
+  /** in-progress answer text, accumulated token-by-token while status === "streaming" */
+  streamText?: string;
   /** populated once the request resolves */
   response?: AskResponse;
   /** error message if status === "error" */

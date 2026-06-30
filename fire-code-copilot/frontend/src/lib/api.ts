@@ -188,6 +188,131 @@ export function ask(body: AskRequest): Promise<AskResponse> {
   return post<AskResponse>("/ask", body);
 }
 
+/* ------------------------------------------------------------- Streaming -- */
+
+/**
+ * Callbacks driven by POST /ask/stream (Server-Sent Events). The stream emits
+ * zero-or-more `token`s, then exactly one of (`clarify` | `meta`), then `done`;
+ * an `error` may arrive instead at any point. Each callback maps 1:1 to an event
+ * `type` on the wire — see the backend SSE contract.
+ */
+export interface StreamHandlers {
+  /** a `token` event: append `text` to the live answer */
+  onToken: (text: string) => void;
+  /** a `clarify` event: this turn is a clarification, not an answer (discard tokens) */
+  onClarify: (q: string[], chips: Record<string, string[]>, escalated: boolean) => void;
+  /** a `meta` event: finalize — full answer = accumulated tokens + answer_suffix */
+  onMeta: (m: {
+    sources: Source[];
+    citations_ok: boolean;
+    unverified: string[];
+    answer_suffix: string;
+    escalated: boolean;
+  }) => void;
+  /** an `error` event, or a network/HTTP failure */
+  onError: (message: string) => void;
+}
+
+/**
+ * Stream an answer token-by-token from POST /ask/stream. Reads the SSE body,
+ * splits on the blank-line event delimiter, parses each `data: {json}` line and
+ * dispatches by `type`. Resolves when the stream ends (or after onError).
+ *
+ * In demo mode the network is short-circuited and the stream is simulated from
+ * canned content (see demo.ts::demoApi.stream).
+ */
+export async function askStream(body: AskRequest, h: StreamHandlers): Promise<void> {
+  if (DEMO) return demoApi.stream(h);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/ask/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    h.onError(`Could not reach the backend at ${API_BASE}. ${detail}`);
+    return;
+  }
+
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    h.onError(text || `${res.status} ${res.statusText}`);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  // Route one parsed SSE payload to the matching handler.
+  const dispatch = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") return;
+    const ev = payload as { type?: string; [k: string]: unknown };
+    switch (ev.type) {
+      case "token":
+        h.onToken(String(ev.text ?? ""));
+        break;
+      case "clarify":
+        h.onClarify(
+          (ev.clarifying_questions as string[]) ?? [],
+          (ev.chips as Record<string, string[]>) ?? {},
+          Boolean(ev.escalated),
+        );
+        break;
+      case "meta":
+        h.onMeta({
+          sources: (ev.sources as Source[]) ?? [],
+          citations_ok: Boolean(ev.citations_ok),
+          unverified: (ev.unverified as string[]) ?? [],
+          answer_suffix: String(ev.answer_suffix ?? ""),
+          escalated: Boolean(ev.escalated),
+        });
+        break;
+      case "error":
+        h.onError(String(ev.message ?? "Stream error."));
+        break;
+      // "done" and any unknown types are ignored.
+    }
+  };
+
+  // Pull one `data: {json}` event out of a `\n\n`-delimited chunk.
+  const handleChunk = (chunk: string) => {
+    for (const line of chunk.split("\n")) {
+      if (!line.startsWith("data:")) continue;
+      const json = line.slice(5).trim();
+      if (!json) continue;
+      try {
+        dispatch(JSON.parse(json));
+      } catch {
+        /* ignore malformed lines rather than aborting the stream */
+      }
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Events are separated by a blank line; process all complete ones.
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const chunk = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        handleChunk(chunk);
+      }
+    }
+    // Flush any trailing event that wasn't terminated by a blank line.
+    if (buffer.trim()) handleChunk(buffer);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    h.onError(`The answer stream was interrupted. ${detail}`);
+  }
+}
+
 /** Continue a thread after the marshal answers clarifying questions. */
 export function clarify(body: ClarifyRequest): Promise<AskResponse> {
   if (DEMO) return demoApi.clarify();

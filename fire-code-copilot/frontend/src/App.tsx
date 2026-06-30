@@ -13,7 +13,7 @@
  * /clarify (original question + assembled answers) and replaces that turn.
  */
 import { useEffect, useRef, useState } from "react";
-import { ask, clarify, getHealth, ApiError, type Health, type Provider } from "./lib/api";
+import { askStream, clarify, getHealth, ApiError, type AskResponse, type Health, type Provider } from "./lib/api";
 import type { Turn, AssistantTurn } from "./lib/types";
 import { DEMO, DEMO_VARIANT, demoAnswer, demoClarify } from "./demo";
 import ChatMessage from "./components/ChatMessage";
@@ -87,13 +87,63 @@ export default function App() {
     setTurns((prev) => [
       ...prev,
       { id: uid(), role: "user", text: question, buildingContext: ctx },
-      { id: assistantId, role: "assistant", status: "loading", question, buildingContext: ctx },
+      { id: assistantId, role: "assistant", status: "streaming", streamText: "", question, buildingContext: ctx },
     ]);
     setDraft("");
     setSending(true);
     try {
-      const res = await ask({ question, building_context: ctx || undefined, deep, provider });
-      patchTurn(assistantId, { status: "done", response: res });
+      await askStream(
+        { question, building_context: ctx || undefined, deep, provider },
+        {
+          // Append each token to the in-progress text. Use the functional updater
+          // so rapid back-to-back tokens compose instead of clobbering each other.
+          onToken: (t) =>
+            setTurns((prev) =>
+              prev.map((turn) =>
+                turn.id === assistantId && turn.role === "assistant"
+                  ? { ...turn, streamText: (turn.streamText ?? "") + t }
+                  : turn,
+              ),
+            ),
+          // A clarification arrived: discard any streamed text and render chips.
+          onClarify: (q, chips, escalated) =>
+            patchTurn(assistantId, {
+              status: "done",
+              streamText: "",
+              response: {
+                mode: "answer",
+                answer: null,
+                sources: [],
+                citations_ok: true,
+                unverified: [],
+                needs_clarification: true,
+                clarifying_questions: q,
+                chips,
+                escalated,
+              },
+            }),
+          // Finalize: the answer is the accumulated tokens + the meta suffix.
+          onMeta: (m) =>
+            setTurns((prev) =>
+              prev.map((turn) => {
+                if (turn.id !== assistantId || turn.role !== "assistant") return turn;
+                const response: AskResponse = {
+                  mode: "answer",
+                  answer: (turn.streamText ?? "") + m.answer_suffix,
+                  sources: m.sources,
+                  citations_ok: m.citations_ok,
+                  unverified: m.unverified,
+                  needs_clarification: false,
+                  clarifying_questions: [],
+                  chips: {},
+                  escalated: m.escalated,
+                };
+                return { ...turn, status: "done", response };
+              }),
+            ),
+          onError: (msg) => patchTurn(assistantId, { status: "error", error: msg }),
+        },
+      );
     } catch (e) {
       patchTurn(assistantId, {
         status: "error",
