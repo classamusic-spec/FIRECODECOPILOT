@@ -1,0 +1,78 @@
+# =====================================================================
+#  Fire Code CoPilot — Adopted Code Cycle Configuration
+#  Copy to config/code_cycles.yaml and FINALIZE against your actual books
+#  and the CT DAS Office of State Building Inspector / State Fire Marshal.
+#
+#  This file does TWO jobs:
+#   1. Tells the agent which editions are authoritative (injected into its prompt).
+#   2. Drives the "is a new cycle due?" reminder banner.
+#
+#  ⚠️ VERIFY every entry. Editions below are best-effort starting points,
+#     not legal advice. You are the AHJ — confirm before relying on them.
+# =====================================================================
+
+jurisdiction: "City of Hartford, Connecticut"
+
+# The state authority that adopts/amends the codes Hartford enforces.
+authority_source:
+  name: "CT DAS — Office of the State Building Inspector / State Fire Marshal"
+  url: "https://portal.ct.gov/das/office-of-state-building-inspector/building-and-fire-code-adoption-process"
+  # Check this URL when a review reminder fires.
+
+# -------- Currently in effect (VERIFY against your books) --------
+active_cycle:
+  label: "2022 Connecticut State Codes"
+  status: "in_effect"        # in_effect | superseded | pending
+  effective_date: "2022-10-01"   # VERIFY exact date
+  review_after: "2026-06-01"     # when to start watching for the next cycle
+  documents:
+    - key: "csfsc"
+      title: "Connecticut State Fire Safety Code (CSFSC)"
+      publisher: "State of CT (amends ICC IFC + NFPA 1)"
+      ct_edition: "2022"
+      base_model_code: "VERIFY — confirm base IFC/NFPA edition for the 2022 CT cycle"
+    - key: "csfpc"
+      title: "Connecticut State Fire Prevention Code (CSFPC)"
+      publisher: "State of CT (amends NFPA 1 / NFPA 101)"
+      ct_edition: "2022"
+      base_model_code: "VERIFY"
+    - key: "csbc"
+      title: "Connecticut State Building Code (CSBC)"
+      publisher: "State of CT (amends ICC I-Codes)"
+      ct_edition: "2022"
+      base_model_code: "VERIFY"
+    - key: "nfpa70"
+      title: "NFPA 70 — National Electrical Code (as adopted by CT)"
+      publisher: "NFPA"
+      ct_edition: "VERIFY"
+      base_model_code: "VERIFY"
+
+# -------- Pending next cycle (watch + warn) --------
+pending_cycle:
+  label: "2026 Connecticut State Codes"
+  status: "pending"
+  # Expected to take effect ~2026-07-01 but awaiting Legislative Regulation
+  # Review Committee (LRRC) approval — the effective date MAY be delayed.
+  expected_effective_date: "2026-07-01"
+  confidence: "uncertain — confirm with CT DAS / LRRC"
+  base_model_codes_referenced:
+    - "2024 International Building Code (IBC)"
+    - "2024 International Fire Code (IFC)"
+    - "2024 International Existing Building Code (IEBC)"
+    - "2024 International Mechanical Code (IMC)"
+    - "2023 NFPA 70 (National Electrical Code)"
+    - "NFPA 1 / NFPA 101 (editions per CT amendments — VERIFY)"
+  notes: >
+    When this cycle is adopted: (1) acquire the new code books, (2) drop them in
+    code_books/, (3) update this file (move pending -> active), (4) re-run ingestion,
+    (5) keep the old edition indexed under a separate collection for legacy/existing-
+    building questions about work permitted under the prior cycle.
+
+# -------- Reminder behavior --------
+reminders:
+  # The app compares today's date to these and shows a banner in the UI.
+  warn_days_before_expected: 90
+  recheck_interval_days: 30
+  message: >
+    A new Connecticut code cycle may be in effect or imminent. Verify at the CT DAS
+    site, update your code books and this config, then re-run ingestion.

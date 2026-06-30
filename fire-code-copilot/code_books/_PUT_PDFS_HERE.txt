@@ -1,0 +1,1 @@
+Drop your purchased code book PDFs in this folder. It is gitignored and never committed.

@@ -1,0 +1,30 @@
+# Fire Code CoPilot — backend dependencies
+# Install: pip install -r requirements.txt
+
+# --- Web API ---
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+
+# --- LLM + embeddings ---
+anthropic              # Claude API (optional escalation only)
+openai                 # talk to local OpenAI-compatible servers (LM Studio / mlx_lm.server / Ollama)
+voyageai               # Voyage embeddings (optional; local is default)
+sentence-transformers  # local embeddings (BGE-M3) + local reranker (CrossEncoder)
+
+# --- Agent / tool exposure ---
+mcp                    # Model Context Protocol server (exposes the tool to Hermes & others)
+
+# --- RAG / vector store ---
+chromadb               # local, file-based vector database
+
+# --- PDF parsing ---
+pymupdf                # primary extractor (import as: fitz) — keeps layout/structure
+pypdf                  # fallback extractor
+
+# --- Utilities ---
+pyyaml                 # read config/code_cycles.yaml
+tiktoken               # token-aware chunking
+python-dateutil        # code-cycle date math
