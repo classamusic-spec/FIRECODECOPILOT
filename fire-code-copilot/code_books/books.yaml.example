@@ -1,0 +1,30 @@
+# Optional manifest for your code books. Copy to books.yaml (gitignored) and edit.
+# Each key is a PDF filename in this folder. Without an entry, ingest falls back to the
+# filename and a filename heuristic for amendment docs.
+#
+#   book              human label shown in citations (e.g. "CSFSC", "IFC")
+#   edition           edition/year used in citations and the per-edition collection
+#   is_amendment_doc  true for Connecticut amendment documents — every chunk is then tagged
+#                     controlling so the retriever overrides the matching base-code section
+#
+# Example (matches the synthetic fixtures from scripts/make_sample_pdf.py):
+
+SAMPLE_fire_code.pdf:
+  book: "IFC (model)"
+  edition: "2021"
+  is_amendment_doc: false
+
+SAMPLE_ct_amendments.pdf:
+  book: "CSFSC"
+  edition: "2022"
+  is_amendment_doc: true
+
+# Your real books, e.g.:
+# "2021 IFC.pdf":
+#   book: "IFC"
+#   edition: "2021"
+#   is_amendment_doc: false
+# "CT Fire Safety Code Amendments 2022.pdf":
+#   book: "CSFSC"
+#   edition: "2022"
+#   is_amendment_doc: true

@@ -1,11 +1,18 @@
 """Central config. Local-first: defaults assume local LLM + local embeddings + local reranker.
 Everything is overridable via .env (see .env.example)."""
 from __future__ import annotations
+from pathlib import Path
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Project root = the fire-code-copilot/ dir (this file is backend/app/settings.py). We anchor the
+# .env file and all relative paths here so the app behaves the same whether you run it from the
+# repo root, from backend/, or via `uvicorn`/`python -m` — cwd no longer changes where data lands.
+_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(_ROOT / ".env"), extra="ignore")
 
     # --- Generation ---
     # "local" = OpenAI-compatible server (LM Studio / mlx_lm.server / Ollama). "anthropic" = Claude API.
@@ -44,6 +51,17 @@ class Settings(BaseSettings):
 
     # Generation tuning
     temperature: float = 0.1                         # low for code work
+
+    @model_validator(mode="after")
+    def _anchor_paths(self):
+        """Resolve relative path settings against the project root (not the current dir), so
+        `./code_books` and `./data` always point at the same place regardless of where you run."""
+        for field in ("code_books_dir", "data_dir", "code_cycles_config", "chroma_dir"):
+            val = Path(getattr(self, field)).expanduser()
+            if not val.is_absolute():
+                val = _ROOT / val
+            setattr(self, field, str(val))
+        return self
 
 
 settings = Settings()

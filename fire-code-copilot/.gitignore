@@ -1,0 +1,55 @@
+# =====================================================================
+#  Fire Code CoPilot — copyright & secret containment
+#  Rule #1: NEVER commit code books, extracted text, embeddings, the
+#  vector store, or secrets. If you add a path that holds code text,
+#  add it here too. Verify with: bash scripts/check_containment.sh
+# =====================================================================
+
+# --- Copyrighted code books (PDFs / ebooks) ---
+code_books/*
+!code_books/_PUT_PDFS_HERE.txt
+!code_books/books.yaml.example
+*.pdf
+*.epub
+*.mobi
+
+# --- Any extracted / derived code text ---
+extracted_text/
+*.extracted.txt
+
+# --- Generated runtime data (vector store, feedback DB, ingest cache) ---
+data/*
+!data/_GENERATED_AT_RUNTIME.txt
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Secrets / local config ---
+.env
+.env.*
+!.env.example
+
+# --- Finalized cycle config (may reference your specific books) ---
+config/code_cycles.yaml
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

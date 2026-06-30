@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .settings import settings
 from . import embeddings
-from .chunking import chunk_pages
+from .chunking import chunk_pages, TARGET_WORDS as TARGET_HINT
 
 STATE_FILE = Path(settings.data_dir) / "ingest_state.json"
 
@@ -102,8 +102,58 @@ def ingest(force: bool = False) -> dict:
     return summary
 
 
+def inspect(samples: int = 2) -> dict:
+    """Dry run: extract + chunk every PDF and report how section detection landed — WITHOUT
+    embedding or writing to Chroma. Run this on a real book FIRST (per BUILD_PLAN Phase 1) to
+    confirm section numbers, pages, tables, and amendment tags look right before a full ingest:
+
+        python -m app.ingest --inspect
+    """
+    books_dir = Path(os.path.expanduser(settings.code_books_dir))
+    pdfs = sorted(books_dir.glob("*.pdf"))
+    if not pdfs:
+        return {"error": f"No PDFs found in {books_dir}. Put your code books there."}
+    manifest = _books_manifest()
+
+    for pdf in pdfs:
+        meta = _meta_for(pdf, manifest)
+        pages = _read_pdf(pdf)
+        chunks = chunk_pages(pages, meta)
+        sections = [c["metadata"]["section"] for c in chunks]
+        preamble = sum(s == "(preamble)" for s in sections)
+        tables = sum(c["metadata"]["is_table"] for c in chunks)
+        amend = sum(c["metadata"]["is_amendment"] for c in chunks)
+        sizes = sorted(len(c["text"].split()) for c in chunks) or [0]
+
+        print(f"\n===== {pdf.name} =====")
+        print(f"  book={meta['book']!r} edition={meta['edition']!r} amendment_doc={meta['is_amendment_doc']}")
+        print(f"  pages={len(pages)}  chunks={len(chunks)}  tables={tables}  amendment_chunks={amend}")
+        print(f"  distinct sections={len(set(sections))}  (preamble)-only chunks={preamble}")
+        print(f"  chunk size words: min={sizes[0]} median={sizes[len(sizes)//2]} max={sizes[-1]}")
+        # Flag likely extraction/detection problems so the user knows where to look.
+        flags = []
+        if preamble > max(1, len(chunks) // 5):
+            flags.append("many (preamble) chunks -> section regex may not match this book's numbering")
+        if sizes[-1] >= TARGET_HINT:
+            flags.append(f"largest chunk is {sizes[-1]} words -> long sections are being sub-split (expected)")
+        if len(chunks) and tables == 0:
+            flags.append("no tables detected (fine if the book has none / they're images)")
+        if flags:
+            print("  flags: " + "; ".join(flags))
+        print(f"  --- first {samples} chunk(s) ---")
+        for c in chunks[:samples]:
+            m = c["metadata"]
+            head = c["text"].splitlines()[0][:80] if c["text"] else ""
+            print(f"    §{m['section']} p.{m['page']} amd={m['is_amendment']} tbl={m['is_table']}  | {head}")
+    return {"inspected": len(pdfs)}
+
+
 if __name__ == "__main__":
-    force = "--force" in sys.argv
-    print(f"Ingesting from {settings.code_books_dir} -> collection '{settings.active_collection}'")
-    out = ingest(force=force)
-    print(json.dumps(out, indent=2))
+    if "--inspect" in sys.argv:
+        print(f"Inspecting (dry run) {settings.code_books_dir} — no embedding, nothing written")
+        inspect()
+    else:
+        force = "--force" in sys.argv
+        print(f"Ingesting from {settings.code_books_dir} -> collection '{settings.active_collection}'")
+        out = ingest(force=force)
+        print(json.dumps(out, indent=2))
