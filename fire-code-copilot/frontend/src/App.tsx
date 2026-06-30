@@ -18,7 +18,8 @@ import type { Turn, AssistantTurn } from "./lib/types";
 import { DEMO, DEMO_VARIANT, demoAnswer, demoClarify } from "./demo";
 import ChatMessage from "./components/ChatMessage";
 import CycleBanner from "./components/CycleBanner";
-import { SendIcon, ChevronIcon, BrandMark, SparkIcon } from "./components/icons";
+import ReviewQueue from "./components/ReviewQueue";
+import { SendIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon } from "./components/icons";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}-${(_seq++).toString(36)}`;
@@ -54,6 +55,7 @@ export default function App() {
   const [buildingContext, setBuildingContext] = useState("");
 
   const [health, setHealth] = useState<Health | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const logRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -154,14 +156,27 @@ export default function App() {
               </div>
             </div>
 
-            <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 sm:flex">
-              <span
-                className={"h-1.5 w-1.5 rounded-full " + (health?.ok ? "bg-verified-500 shadow-[0_0_8px] shadow-verified-500/70" : "bg-steel-500")}
-              />
-              <span className="text-xs font-medium text-steel-200">{providerLabel}</span>
-              {health?.model && (
-                <span className="font-mono text-[11px] text-steel-400">· {health.model}</span>
-              )}
+            <div className="flex items-center gap-2">
+              {/* Open the flagged-questions review drawer. */}
+              <button
+                type="button"
+                onClick={() => setReviewOpen(true)}
+                aria-label="Open review queue"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100"
+              >
+                <ListIcon className="h-3.5 w-3.5" />
+                Review
+              </button>
+
+              <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 sm:flex">
+                <span
+                  className={"h-1.5 w-1.5 rounded-full " + (health?.ok ? "bg-verified-500 shadow-[0_0_8px] shadow-verified-500/70" : "bg-steel-500")}
+                />
+                <span className="text-xs font-medium text-steel-200">{providerLabel}</span>
+                {health?.model && (
+                  <span className="font-mono text-[11px] text-steel-400">· {health.model}</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -255,6 +270,9 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Flagged-questions review drawer (slide-over). */}
+      <ReviewQueue open={reviewOpen} onClose={() => setReviewOpen(false)} />
     </div>
   );
 }

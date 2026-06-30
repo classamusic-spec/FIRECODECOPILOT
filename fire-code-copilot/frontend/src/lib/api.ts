@@ -120,6 +120,22 @@ export interface Health {
   model: string;
 }
 
+/** One flagged (👎 / low-confidence) question awaiting the marshal's review. */
+export interface ReviewItem {
+  id: number;
+  created_at: string;
+  question: string;
+  building_context: string;
+  answer: string;
+  rating: string;
+  note: string;
+}
+
+/** Response from GET /review-queue. */
+export interface ReviewQueue {
+  items: ReviewItem[];
+}
+
 /* -------------------------------------------------------------- Internals -- */
 
 /** Error carrying the HTTP status, so callers can branch on it if needed. */
@@ -200,4 +216,10 @@ export function getCycleStatus(): Promise<CycleStatus> {
 export function getHealth(): Promise<Health> {
   if (DEMO) return demoApi.health();
   return request<Health>("/health");
+}
+
+/** The marshal's review queue: 👎/low-confidence questions flagged for follow-up. */
+export function getReviewQueue(): Promise<ReviewQueue> {
+  if (DEMO) return demoApi.review();
+  return request<ReviewQueue>("/review-queue");
 }

@@ -7,7 +7,7 @@
  * and for sharing a clickable preview. NONE of this is real legal text; the answer is
  * illustrative and the citations are synthetic.
  */
-import type { AskResponse, CycleStatus, Health, Source } from "./lib/api";
+import type { AskResponse, CycleStatus, Health, ReviewItem, Source } from "./lib/api";
 
 const params = new URLSearchParams(
   typeof window !== "undefined" ? window.location.search : "",
@@ -132,6 +132,68 @@ export const demoClarify: AskResponse = {
 /** The answer returned after the marshal resolves the clarifying questions. */
 export const demoClarifyResolved: AskResponse = demoAnswer;
 
+/**
+ * demoReview — flagged questions for the Review queue drawer. These are 👎 /
+ * low-confidence turns the marshal pushed back on, with correction notes. As with
+ * the rest of this file the text is illustrative, not authoritative legal content.
+ */
+export const demoReview: ReviewItem[] = [
+  {
+    id: 312,
+    created_at: "2026-06-29T14:22:00Z",
+    question:
+      "Is a sprinkler system required for an existing Group R-2 in Hartford on a change of occupancy?",
+    building_context: "Existing R-2 · 4 stories · 22 units · not sprinklered",
+    answer:
+      "The model IFC §903.2.8.1 requires sprinklers in Group R-2 only where the building is more " +
+      "than three stories, has more than 16 dwelling units, or a fire area exceeds 12,000 sq ft, so " +
+      "this building would already qualify under the base code.",
+    rating: "down",
+    note:
+      "Missed the controlling CT amendment. CSFSC 2022 §903.2.8.4 adds existing Group R-2: " +
+      "sprinklers throughout on a change of occupancy or substantial alteration — that's the " +
+      "governing trigger here, not the base §903.2.8.1 thresholds.",
+  },
+  {
+    id: 305,
+    created_at: "2026-06-28T09:05:00Z",
+    question:
+      "What's the minimum egress width per occupant for a B occupancy without sprinklers?",
+    building_context: "Business · 140 occupants · non-sprinklered · stairs",
+    answer:
+      "Use 0.2 inches per occupant for stairways and 0.15 inches per occupant for other egress " +
+      "components.",
+    rating: "down",
+    note:
+      "Those are the reduced (sprinklered) factors. For a non-sprinklered building use the " +
+      "higher §1005.3 factors: 0.3 in/occupant for stairways, 0.2 in/occupant for other " +
+      "components. Always confirm sprinkler status before picking the multiplier.",
+  },
+  {
+    id: 298,
+    created_at: "2026-06-27T16:48:00Z",
+    question: "Does the CT amendment change fire-rated corridor requirements for R-2?",
+    building_context: "",
+    answer:
+      "No — corridor fire-resistance ratings follow IBC Table 1020.1 unchanged in Connecticut.",
+    rating: "down",
+    note:
+      "Cite the adopted CSBC edition of the table, not the generic IBC, and flag that the rating " +
+      "depends on sprinklered vs. non-sprinklered. Re-verify against the 2022 CSBC corridor table.",
+  },
+  {
+    id: 287,
+    created_at: "2026-06-26T11:30:00Z",
+    question: "Occupant load factor for a fitness area in a mixed-use building?",
+    building_context: "Exercise room · ~1,800 sq ft · gross area",
+    answer: "Use 15 net for the exercise room.",
+    rating: "down",
+    note:
+      "Low confidence — the answer didn't cite the source table or distinguish exercise rooms " +
+      "(50 gross) from exercise equipment areas. Pin to the adopted occupant-load table and show it.",
+  },
+];
+
 const delay = <T>(v: T, ms = 550): Promise<T> =>
   new Promise((r) => setTimeout(() => r(v), ms));
 
@@ -143,4 +205,5 @@ export const demoApi = {
   cycle: () => delay(demoCycle, 120),
   feedback: () => delay({ id: 1, queued_for_review: false }),
   verify: () => delay({ id: "verified-demo", collection: "verified_answers", sections: ["903.2.8.4"] }),
+  review: () => delay({ items: demoReview }),
 };

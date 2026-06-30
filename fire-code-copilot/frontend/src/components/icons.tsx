@@ -92,6 +92,18 @@ export const ShieldIcon = (p: IconProps) => (
   </svg>
 );
 
+export const ListIcon = (p: IconProps) => (
+  // A simple checklist glyph — used for the "Review queue" header control.
+  <svg {...base(p)}>
+    <line x1="8" y1="6" x2="21" y2="6" />
+    <line x1="8" y1="12" x2="21" y2="12" />
+    <line x1="8" y1="18" x2="21" y2="18" />
+    <line x1="3" y1="6" x2="3.01" y2="6" />
+    <line x1="3" y1="12" x2="3.01" y2="12" />
+    <line x1="3" y1="18" x2="3.01" y2="18" />
+  </svg>
+);
+
 /**
  * BrandMark — a flame inside a shield, the app's identity. Uses fill (not the
  * stroke base) so it reads as a solid coral glyph. Pass a className for size.
