@@ -12,6 +12,7 @@ cache the loaded model in a module global, so importing this module stays cheap 
 loads exactly once. Those deps are NOT in the core install — see requirements-local-llm.txt.
 """
 from __future__ import annotations
+from typing import Iterator
 from .settings import settings
 
 # Lazy singletons for the direct-load backends (mirrors embeddings.py / reranker.py).
@@ -36,6 +37,25 @@ def chat(system: str, user: str, *, provider: str | None = None,
     raise ValueError(f"Unknown generation provider: {provider}")
 
 
+def chat_stream(system: str, user: str, *, provider: str | None = None,
+                model: str | None = None, temperature: float | None = None) -> Iterator[str]:
+    """Yield the model's response as text deltas (for token-by-token streaming). Same provider
+    routing as chat(); each backend streams natively. Raises on transport errors."""
+    provider = provider or settings.generation_provider
+    temperature = settings.temperature if temperature is None else temperature
+
+    if provider == "local":
+        yield from _stream_openai_compatible(system, user, model or settings.local_model, temperature)
+    elif provider == "llamacpp":
+        yield from _stream_llamacpp(system, user, temperature)
+    elif provider == "mlx":
+        yield from _stream_mlx(system, user, temperature)
+    elif provider == "anthropic":
+        yield from _stream_anthropic(system, user, model or settings.answer_model, temperature)
+    else:
+        raise ValueError(f"Unknown generation provider: {provider}")
+
+
 def _chat_openai_compatible(system: str, user: str, model: str, temperature: float) -> str:
     from openai import OpenAI
     client = OpenAI(base_url=settings.local_base_url, api_key="not-needed")
@@ -46,6 +66,21 @@ def _chat_openai_compatible(system: str, user: str, model: str, temperature: flo
         temperature=temperature,
     )
     return resp.choices[0].message.content or ""
+
+
+def _stream_openai_compatible(system: str, user: str, model: str, temperature: float) -> Iterator[str]:
+    from openai import OpenAI
+    client = OpenAI(base_url=settings.local_base_url, api_key="not-needed")
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=temperature,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = (chunk.choices[0].delta.content if chunk.choices else None) or ""
+        if delta:
+            yield delta
 
 
 def _get_llama():
@@ -88,6 +123,18 @@ def _chat_llamacpp(system: str, user: str, temperature: float) -> str:
     return resp["choices"][0]["message"]["content"] or ""
 
 
+def _stream_llamacpp(system: str, user: str, temperature: float) -> Iterator[str]:
+    llama = _get_llama()
+    for chunk in llama.create_chat_completion(
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=temperature,
+        stream=True,
+    ):
+        delta = (chunk["choices"][0].get("delta", {}) or {}).get("content") or ""
+        if delta:
+            yield delta
+
+
 def _get_mlx():
     """Lazy-load an MLX model + tokenizer via mlx_lm, once (Apple Silicon only)."""
     global _mlx
@@ -121,6 +168,19 @@ def _chat_mlx(system: str, user: str, temperature: float) -> str:
     return generate(model, tokenizer, prompt=prompt, temp=temperature)
 
 
+def _stream_mlx(system: str, user: str, temperature: float) -> Iterator[str]:
+    from mlx_lm import stream_generate
+    model, tokenizer = _get_mlx()
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    if getattr(tokenizer, "chat_template", None):
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    else:
+        prompt = f"{system}\n\n{user}"
+    for resp in stream_generate(model, tokenizer, prompt=prompt, temp=temperature):
+        # mlx_lm yields response objects with a `.text` delta (older versions yield raw strings).
+        yield getattr(resp, "text", resp)
+
+
 def _chat_anthropic(system: str, user: str, model: str, temperature: float) -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
@@ -133,6 +193,16 @@ def _chat_anthropic(system: str, user: str, model: str, temperature: float) -> s
     )
     # Concatenate text blocks.
     return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+
+
+def _stream_anthropic(system: str, user: str, model: str, temperature: float) -> Iterator[str]:
+    import anthropic
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    with client.messages.stream(
+        model=model, max_tokens=2048, temperature=temperature,
+        system=system, messages=[{"role": "user", "content": user}],
+    ) as stream:
+        yield from stream.text_stream
 
 
 # --------------------------------------------------------------------------------------

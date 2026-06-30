@@ -4,12 +4,14 @@ Run:  uvicorn app.main:app --reload --port 8000
 Then POST /ask, or use the CLI (python -m app.cli) which calls the same agent directly.
 """
 from __future__ import annotations
+import json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .settings import settings
 from .models import (AskRequest, ClarifyRequest, IngestRequest, FeedbackRequest, VerifyRequest)
-from .agent import ask as agent_ask, result_dict
+from .agent import ask as agent_ask, ask_stream as agent_ask_stream, result_dict
 from .cycles import active_cycle_block, cycle_reminder
 from . import feedback as fb
 
@@ -31,6 +33,24 @@ def ask(req: AskRequest):
                     active_cycle_block=active_cycle_block(), deep=req.deep, provider=req.provider,
                     collection=req.collection)
     return result_dict(res)
+
+
+@app.post("/ask/stream")
+def ask_stream(req: AskRequest):
+    """Token-by-token streaming of /ask via Server-Sent Events. Each line is
+    `data: {json}\\n\\n` with a typed event (token | clarify | meta | error | done)."""
+    def sse():
+        try:
+            for event in agent_ask_stream(
+                req.question, building_context=req.building_context,
+                active_cycle_block=active_cycle_block(), deep=req.deep,
+                provider=req.provider, collection=req.collection):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:  # never leave the stream hanging on an unexpected error
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(sse(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/clarify")

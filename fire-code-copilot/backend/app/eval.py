@@ -10,6 +10,9 @@ Run it:  python -m app.eval        (prints a report, exits non-zero on regressio
 It's also wired into the test suite (tests/test_eval.py) so changes can't silently regress.
 """
 from __future__ import annotations
+import contextlib
+import json
+import re
 import shutil
 import sys
 import tempfile
@@ -149,6 +152,100 @@ def run(top_k: int | None = None) -> dict:
     }
 
 
+@contextlib.contextmanager
+def _eval_corpus(top_k: int = 6):
+    """Stand up the synthetic index in a temp dir, point settings at it, and restore after."""
+    import chromadb
+    tmp = tempfile.mkdtemp(prefix="fcc-eval-")
+    saved = (settings.chroma_dir, settings.active_collection, settings.verified_collection,
+             settings.use_reranker, settings.retrieve_before_rerank, settings.keep_after_rerank)
+    settings.chroma_dir = tmp
+    settings.active_collection = "eval"
+    settings.verified_collection = "eval_verified"
+    settings.use_reranker = False
+    settings.keep_after_rerank = top_k
+    settings.retrieve_before_rerank = max(settings.retrieve_before_rerank, 20)
+    try:
+        client = chromadb.PersistentClient(path=tmp)
+        n = _build_corpus(client.get_or_create_collection("eval"))
+        yield n
+    finally:
+        (settings.chroma_dir, settings.active_collection, settings.verified_collection,
+         settings.use_reranker, settings.retrieve_before_rerank, settings.keep_after_rerank) = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --- LLM-judge answer grading (opt-in; needs a generation model configured) ----------------
+_JUDGE_SYSTEM = (
+    "You are a strict evaluator of a fire-code assistant's answers. You are given the QUESTION, "
+    "the exact SOURCES the assistant was shown, its ANSWER, and the EXPECTED governing section. "
+    "Judge ONLY against the sources — do not use outside knowledge. Reply with ONLY a JSON object:\n"
+    '{"grounded": true/false, "cites_governing": true/false, "no_fabrication": true/false, '
+    '"score": 0.0-1.0, "notes": "one sentence"}\n'
+    "grounded = every substantive claim is supported by the sources; cites_governing = the answer "
+    "cites the expected governing section; no_fabrication = no invented section numbers or quotes; "
+    "score = overall faithfulness/usefulness."
+)
+
+
+def _parse_judge(text: str) -> dict:
+    s = text.strip()
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", s, re.DOTALL) or re.search(r"(\{.*\})", s, re.DOTALL)
+    if m:
+        s = m.group(1)
+    try:
+        return json.loads(s)
+    except (ValueError, json.JSONDecodeError):
+        return {"grounded": False, "cites_governing": False, "no_fabrication": False,
+                "score": 0.0, "notes": "judge output was not valid JSON"}
+
+
+def grade_answer(question: str, sources_block: str, answer: str, expect_section: str,
+                 *, provider: str | None = None) -> dict:
+    """Have the judge model grade one answer against its sources. Returns the parsed verdict."""
+    from . import llm
+    user = (f"QUESTION:\n{question}\n\nEXPECTED GOVERNING SECTION: {expect_section}\n\n"
+            f"SOURCES:\n{sources_block}\n\nANSWER:\n{answer}\n\nGrade it per your instructions.")
+    return _parse_judge(llm.chat(_JUDGE_SYSTEM, user, provider=provider))
+
+
+def run_judged(provider: str | None = None, pass_score: float = 0.7) -> dict:
+    """Generate an answer for each golden case and have a judge model grade faithfulness +
+    citation correctness. Needs a generation model configured (GENERATION_PROVIDER); if generation
+    isn't available, returns {"skipped": <reason>} rather than failing."""
+    from . import agent
+    from .retriever import render_sources
+
+    cases = (yaml.safe_load(GOLDEN.read_text()) or {}).get("cases", [])
+    graded, scores = [], []
+    with _eval_corpus() as n:
+        for case in cases:
+            try:
+                res = agent.ask(case["q"], provider=provider)
+            except Exception as e:
+                return {"skipped": f"generation unavailable ({e}). Configure GENERATION_PROVIDER "
+                                   f"(see docs/LOCAL_MODELS.md) or pass provider=...", "corpus_chunks": n}
+            answer = res.answer or "(the assistant asked for clarification instead of answering)"
+            verdict = grade_answer(case["q"], render_sources(res.sources), answer,
+                                   case["expect_section"], provider=provider)
+            score = float(verdict.get("score", 0.0) or 0.0)
+            scores.append(score)
+            graded.append({"q": case["q"], "expect": case["expect_section"],
+                           "score": score, "pass": score >= pass_score,
+                           "cites_governing": bool(verdict.get("cites_governing")),
+                           "grounded": bool(verdict.get("grounded")),
+                           "no_fabrication": bool(verdict.get("no_fabrication")),
+                           "notes": verdict.get("notes", "")})
+    total = len(graded)
+    return {
+        "corpus_chunks": n,
+        "total": total,
+        "passed": sum(g["pass"] for g in graded),
+        "mean_score": (sum(scores) / total) if total else 0.0,
+        "results": graded,
+    }
+
+
 def _print(report: dict) -> None:
     print(f"Eval corpus: {report['corpus_chunks']} chunks  |  golden cases: {report['total']}")
     for r in report["results"]:
@@ -165,7 +262,25 @@ def _print(report: dict) -> None:
     print(f"Score: {report['passed']}/{report['total']} = {report['score']:.0%}")
 
 
+def _print_judged(report: dict) -> None:
+    if report.get("skipped"):
+        print(f"LLM-judge grading skipped: {report['skipped']}")
+        return
+    print(f"LLM-judge grading ({report['total']} cases, corpus {report['corpus_chunks']} chunks):")
+    for r in report["results"]:
+        mark = "✅" if r["pass"] else "❌"
+        flags = f"cites={r['cites_governing']} grounded={r['grounded']} no_fab={r['no_fabrication']}"
+        print(f"  {mark} {r['score']:.2f}  §{r['expect']:<12} {flags}  | {r['q']}")
+        if r["notes"]:
+            print(f"       ↳ {r['notes']}")
+    print(f"\nMean score: {report['mean_score']:.2f}  |  passed: {report['passed']}/{report['total']}")
+
+
 if __name__ == "__main__":
+    if "--judge" in sys.argv:
+        # Generate + LLM-judge each golden answer (needs a model). Deterministic retrieval eval still runs.
+        _print_judged(run_judged())
+        sys.exit(0)
     rep = run()
     _print(rep)
     ok = rep["score"] >= 0.9 and rep["safety_validator_flags_fabrication"]

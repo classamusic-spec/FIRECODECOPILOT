@@ -103,6 +103,73 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
                        citations_ok=True, unverified=[], escalated=use_deep)
 
 
+def ask_stream(question: str, *, building_context: str = "", active_cycle_block: str = "",
+               deep: bool = False, provider: str | None = None, collection: str | None = None):
+    """Streaming twin of ask(): yields event dicts for Server-Sent Events.
+
+    Event types (exactly one of clarify/meta terminates the answer, then done):
+      {"type":"token","text": ...}     incremental answer text
+      {"type":"clarify", ...}          the model asked for facts instead (chips/questions)
+      {"type":"meta", ...}             sources + citation verdict + any unverified-warning suffix
+      {"type":"error","message": ...}
+      {"type":"done"}
+
+    We peek the first non-empty delta: if it starts with "{" the model is returning the
+    clarification JSON, so we buffer silently (never stream raw JSON to the UI) and resolve it
+    at the end; otherwise we stream tokens as they arrive.
+    """
+    scored = retrieve_scored(question, collection=collection)
+    chunks = [s.chunk for s in scored]
+
+    top_score = max((s.score for s in scored), default=0.0)
+    auto_deep = settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
+    use_deep = deep or auto_deep
+
+    system = _system_prompt(active_cycle_block)
+    user = _build_user_block(question, building_context, render_sources(chunks)) + _OUTPUT_PROTOCOL
+    gen_provider = provider or (settings.deep_provider if use_deep else settings.generation_provider)
+    model = settings.deep_model if use_deep else None
+
+    buffer: list[str] = []
+    mode: str | None = None          # undecided -> "answer" | "json"
+    try:
+        for delta in llm.chat_stream(system, user, provider=gen_provider, model=model):
+            buffer.append(delta)
+            if mode is None:
+                head = "".join(buffer).lstrip()
+                if not head:
+                    continue
+                mode = "json" if head[0] == "{" else "answer"
+                if mode == "answer":
+                    yield {"type": "token", "text": "".join(buffer)}  # flush what we buffered
+            elif mode == "answer":
+                yield {"type": "token", "text": delta}
+    except Exception as e:                                              # transport/model failure
+        yield {"type": "error", "message": str(e)}
+        return
+
+    full = "".join(buffer)
+    clar = _parse_clarification(full)
+    if clar is not None:
+        yield {"type": "clarify", "clarifying_questions": clar.get("questions", []),
+               "chips": clar.get("chips", {}) or {}, "escalated": use_deep}
+        yield {"type": "done"}
+        return
+
+    if mode != "answer" and full.strip():     # was buffered as JSON but isn't a valid clarification
+        yield {"type": "token", "text": full}
+
+    suffix, ok, unverified = "", True, []
+    if settings.validate_citations:
+        check = citations.validate(full, chunks)
+        suffix = citations.annotate(full, check)[len(full):]   # just the appended warning text
+        ok, unverified = check.ok, check.unverified
+
+    yield {"type": "meta", "sources": chunks, "citations_ok": ok, "unverified": unverified,
+           "answer_suffix": suffix, "escalated": use_deep}
+    yield {"type": "done"}
+
+
 def _parse_clarification(draft: str) -> dict | None:
     """If the model returned the clarification JSON (optionally fenced), parse it; else None."""
     s = draft.strip()
