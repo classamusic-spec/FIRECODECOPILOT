@@ -54,7 +54,7 @@ export default function SourceCitation({ source, index }: Props) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition active:scale-[0.99]"
       >
         <ChevronIcon className={"shrink-0 text-steel-500 transition-transform " + (open ? "rotate-90" : "")} />
         <span className="shrink-0 font-mono text-xs text-steel-500">[{index}]</span>

@@ -211,6 +211,14 @@ export interface StreamHandlers {
   }) => void;
   /** an `error` event, or a network/HTTP failure */
   onError: (message: string) => void;
+  /** the in-flight request was aborted via opts.signal (NOT routed to onError) */
+  onAbort?: () => void;
+}
+
+/** Per-call options for {@link askStream}. */
+export interface AskStreamOpts {
+  /** when this aborts, the fetch/reader is cancelled and onAbort fires */
+  signal?: AbortSignal;
 }
 
 /**
@@ -221,8 +229,12 @@ export interface StreamHandlers {
  * In demo mode the network is short-circuited and the stream is simulated from
  * canned content (see demo.ts::demoApi.stream).
  */
-export async function askStream(body: AskRequest, h: StreamHandlers): Promise<void> {
-  if (DEMO) return demoApi.stream(h);
+export async function askStream(
+  body: AskRequest,
+  h: StreamHandlers,
+  opts?: AskStreamOpts,
+): Promise<void> {
+  if (DEMO) return demoApi.stream(h, opts);
 
   let res: Response;
   try {
@@ -230,8 +242,15 @@ export async function askStream(body: AskRequest, h: StreamHandlers): Promise<vo
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: opts?.signal,
     });
   } catch (e) {
+    // A user-initiated abort surfaces as an AbortError — treat it as a clean stop,
+    // not an error the UI should shout about.
+    if (e instanceof DOMException && e.name === "AbortError") {
+      h.onAbort?.();
+      return;
+    }
     const detail = e instanceof Error ? e.message : String(e);
     h.onError(`Could not reach the backend at ${API_BASE}. ${detail}`);
     return;
@@ -308,6 +327,11 @@ export async function askStream(body: AskRequest, h: StreamHandlers): Promise<vo
     // Flush any trailing event that wasn't terminated by a blank line.
     if (buffer.trim()) handleChunk(buffer);
   } catch (e) {
+    // An abort cancels the reader and throws — finalize quietly via onAbort.
+    if (e instanceof DOMException && e.name === "AbortError") {
+      h.onAbort?.();
+      return;
+    }
     const detail = e instanceof Error ? e.message : String(e);
     h.onError(`The answer stream was interrupted. ${detail}`);
   }

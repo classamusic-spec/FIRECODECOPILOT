@@ -78,6 +78,21 @@ export const CheckIcon = (p: IconProps) => (
   </svg>
 );
 
+export const StopIcon = (p: IconProps) => (
+  // A rounded square — the "stop generation" glyph shown on the send button mid-stream.
+  <svg {...base(p)}>
+    <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+export const CopyIcon = (p: IconProps) => (
+  // Two overlapping sheets — "copy answer to clipboard".
+  <svg {...base(p)}>
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
 export const SparkIcon = (p: IconProps) => (
   // A four-point "deep mode" spark.
   <svg {...base(p)}>

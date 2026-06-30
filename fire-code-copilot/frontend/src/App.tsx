@@ -19,10 +19,13 @@ import { DEMO, DEMO_VARIANT, demoAnswer, demoClarify } from "./demo";
 import ChatMessage from "./components/ChatMessage";
 import CycleBanner from "./components/CycleBanner";
 import ReviewQueue from "./components/ReviewQueue";
-import { SendIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon } from "./components/icons";
+import { SendIcon, StopIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon } from "./components/icons";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}-${(_seq++).toString(36)}`;
+
+/** Distance (px) from the bottom within which we treat the log as "at bottom". */
+const NEAR_BOTTOM_PX = 140;
 
 /** In showcase mode, pre-seed the log so the UI renders fully populated. */
 function demoSeed(): Turn[] {
@@ -57,8 +60,14 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
 
+  // True while new content should auto-follow the user. Flips off when the user
+  // scrolls up to read; the "Latest" pill appears so they can jump back down.
+  const [atBottom, setAtBottom] = useState(true);
+
   const logRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Holds the AbortController for the in-flight send so Stop can cancel it.
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -68,9 +77,46 @@ export default function App() {
     return () => { alive = false; };
   }, []);
 
+  // Smart auto-scroll: only follow new content when the user is already near the
+  // bottom, so scrolling up to read isn't yanked back down on every token.
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns]);
+    if (atBottom) scrollToBottom();
+  }, [turns, atBottom]);
+
+  // ⌘K / Ctrl-K focuses the composer from anywhere in the app.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        const el = textareaRef.current;
+        el?.focus();
+        // Put the caret at the end if there's an existing draft.
+        el?.setSelectionRange(el.value.length, el.value.length);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** Grow the composer to fit its content (1 line up to the max-h-40 cap, then scroll). */
+  function autosize(el: HTMLTextAreaElement) {
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }
+
+  /** Smoothly pin the log to the latest message. */
+  function scrollToBottom() {
+    const el = logRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }
+
+  /** Track whether the user is near the bottom; drives auto-follow + the pill. */
+  function onLogScroll() {
+    const el = logRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setAtBottom(distance <= NEAR_BOTTOM_PX);
+  }
 
   function patchTurn(id: string, patch: Partial<AssistantTurn>) {
     setTurns((prev) =>
@@ -90,7 +136,16 @@ export default function App() {
       { id: assistantId, role: "assistant", status: "streaming", streamText: "", question, buildingContext: ctx },
     ]);
     setDraft("");
+    // Reset the auto-grown composer back to a single line after a send.
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    // A fresh send always follows the new content.
+    setAtBottom(true);
     setSending(true);
+
+    // Track this send so the Stop button can abort it.
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       await askStream(
         { question, building_context: ctx || undefined, deep, provider },
@@ -142,7 +197,29 @@ export default function App() {
               }),
             ),
           onError: (msg) => patchTurn(assistantId, { status: "error", error: msg }),
+          // Stopped by the user: finalize the turn using whatever streamed so far
+          // as the answer (with a faint "(stopped)" note iff there was any text).
+          onAbort: () =>
+            setTurns((prev) =>
+              prev.map((turn) => {
+                if (turn.id !== assistantId || turn.role !== "assistant") return turn;
+                const partial = turn.streamText ?? "";
+                const response: AskResponse = {
+                  mode: "answer",
+                  answer: partial ? partial + " _(stopped)_" : "",
+                  sources: [],
+                  citations_ok: true,
+                  unverified: [],
+                  needs_clarification: false,
+                  clarifying_questions: [],
+                  chips: {},
+                  escalated: false,
+                };
+                return { ...turn, status: "done", response };
+              }),
+            ),
         },
+        { signal: controller.signal },
       );
     } catch (e) {
       patchTurn(assistantId, {
@@ -150,9 +227,15 @@ export default function App() {
         error: e instanceof ApiError ? e.message : "Unexpected error.",
       });
     } finally {
+      abortRef.current = null;
       setSending(false);
       textareaRef.current?.focus();
     }
+  }
+
+  /** Stop button: abort the active stream; onAbort finalizes the turn. */
+  function handleStop() {
+    abortRef.current?.abort();
   }
 
   async function handleClarify(turnId: string, answers: string) {
@@ -237,7 +320,7 @@ export default function App() {
       </header>
 
       {/* ------------------------------------------------------- Message log */}
-      <main ref={logRef} className="scroll-thin flex-1 overflow-y-auto">
+      <main ref={logRef} onScroll={onLogScroll} className="scroll-thin flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
           {turns.length === 0 ? (
             <EmptyState onPick={(ex) => { setDraft(ex); textareaRef.current?.focus(); }} />
@@ -248,7 +331,20 @@ export default function App() {
       </main>
 
       {/* ---------------------------------------------------------- Composer */}
-      <footer className="border-t border-white/10 bg-navy-950/70 backdrop-blur-xl">
+      <footer className="relative border-t border-white/10 bg-navy-950/70 backdrop-blur-xl">
+        {/* "Jump to latest" pill — floats above the composer when the user has
+            scrolled up while new content is arriving. */}
+        {!atBottom && turns.length > 0 && (
+          <button
+            type="button"
+            onClick={() => { setAtBottom(true); scrollToBottom(); }}
+            className="glass absolute -top-12 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-steel-200 shadow-card transition hover:text-white active:scale-95 animate-rise"
+          >
+            <ChevronIcon className="h-3.5 w-3.5 rotate-90" />
+            Latest
+          </button>
+        )}
+
         <div className="mx-auto w-full max-w-3xl px-4 py-3">
           {/* Collapsible building-context field. */}
           <div className="mb-2">
@@ -282,21 +378,39 @@ export default function App() {
               id="composer"
               ref={textareaRef}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              // Grow with content (1 → ~8 lines, then scroll): reset to auto so the
+              // height shrinks on delete, then size to the content's scrollHeight.
+              onChange={(e) => { setDraft(e.target.value); autosize(e.currentTarget); }}
               onKeyDown={onKeyDown}
               rows={1}
               placeholder="Ask a code question…  (Enter to send · Shift+Enter for a new line)"
               className="scroll-thin max-h-40 min-h-[2.75rem] w-full resize-none bg-transparent px-2.5 py-2.5 text-[15px] leading-relaxed text-steel-100 placeholder:text-steel-500 focus:outline-none"
             />
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!draft.trim() || sending}
-              aria-label="Send question"
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow-glow transition hover:bg-coral-400 disabled:cursor-not-allowed disabled:bg-steel-700 disabled:text-steel-500 disabled:shadow-none"
-            >
-              <SendIcon className="h-[18px] w-[18px]" />
-            </button>
+            {/* ⌘K hint — muted, hidden on small screens. */}
+            <kbd className="mb-2.5 hidden select-none items-center rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-steel-500 sm:inline-flex">
+              ⌘K
+            </kbd>
+            {sending ? (
+              // While streaming, the coral button becomes a Stop (abort) control.
+              <button
+                type="button"
+                onClick={handleStop}
+                aria-label="Stop generating"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow-glow transition hover:bg-coral-400 active:scale-95"
+              >
+                <StopIcon className="h-[18px] w-[18px]" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!draft.trim()}
+                aria-label="Send question"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow-glow transition hover:bg-coral-400 active:scale-95 disabled:cursor-not-allowed disabled:bg-steel-700 disabled:text-steel-500 disabled:shadow-none disabled:active:scale-100"
+              >
+                <SendIcon className="h-[18px] w-[18px]" />
+              </button>
+            )}
           </div>
 
           {/* Option toggles. */}
@@ -307,7 +421,7 @@ export default function App() {
               onClick={() => setDeep((v) => !v)}
               aria-pressed={deep}
               className={
-                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 font-medium transition-colors " +
+                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 font-medium transition active:scale-95 " +
                 (deep
                   ? "border-coral-500/50 bg-coral-500/15 text-coral-200"
                   : "border-white/10 bg-white/[0.03] text-steel-400 hover:text-steel-200")
@@ -384,7 +498,7 @@ function EmptyState({ onPick }: { onPick: (ex: string) => void }) {
             key={ex}
             type="button"
             onClick={() => onPick(ex)}
-            className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-sm text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.06] hover:text-steel-100"
+            className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-sm text-steel-300 transition active:scale-[0.98] hover:border-coral-500/40 hover:bg-white/[0.06] hover:text-steel-100"
           >
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-coral-500/70 transition group-hover:bg-coral-400" />
             {ex}

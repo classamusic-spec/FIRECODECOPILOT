@@ -7,7 +7,7 @@
  * and for sharing a clickable preview. NONE of this is real legal text; the answer is
  * illustrative and the citations are synthetic.
  */
-import type { AskResponse, CycleStatus, Health, ReviewItem, Source, StreamHandlers } from "./lib/api";
+import type { AskResponse, AskStreamOpts, CycleStatus, Health, ReviewItem, Source, StreamHandlers } from "./lib/api";
 
 const params = new URLSearchParams(
   typeof window !== "undefined" ? window.location.search : "",
@@ -200,13 +200,35 @@ const delay = <T>(v: T, ms = 550): Promise<T> =>
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Abortable sleep used by the demo stream: resolves after `ms`, OR immediately
+ * (clearing the pending timer) the moment `signal` aborts — so a Stop click
+ * doesn't have to wait out the last token's delay.
+ */
+const sleepUntil = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+
+/**
  * Simulate the real /ask/stream event order offline so the demo answer animates
  * in token-by-token. Clarify variant emits a single onClarify; otherwise it dribbles
  * the canned answer out as word chunks, then finalizes with onMeta.
  */
-async function demoStream(h: StreamHandlers): Promise<void> {
+async function demoStream(h: StreamHandlers, opts?: AskStreamOpts): Promise<void> {
+  // Treat an already-fired (or mid-stream) abort signal as a clean stop, mirroring
+  // the real askStream: bail before the next scheduled chunk and call onAbort.
+  const aborted = () => Boolean(opts?.signal?.aborted);
+  if (aborted()) { h.onAbort?.(); return; }
+
   if (DEMO_VARIANT === "clarify") {
     await sleep(450);
+    if (aborted()) { h.onAbort?.(); return; }
     h.onClarify(demoClarify.clarifying_questions, demoClarify.chips, false);
     return;
   }
@@ -216,9 +238,13 @@ async function demoStream(h: StreamHandlers): Promise<void> {
   // (concatenation) reproduces the original answer exactly.
   const chunks = (demoAnswer.answer ?? "").match(/\S+\s*/g) ?? [];
   for (const chunk of chunks) {
+    // Check before each scheduled chunk; stop emitting tokens once aborted.
+    if (aborted()) { h.onAbort?.(); return; }
     h.onToken(chunk);
-    await sleep(25 + Math.random() * 15); // ~25–40ms, to look like real streaming
+    // ~25–40ms per chunk, but short-circuit (and clear the timer) on abort.
+    await sleepUntil(25 + Math.random() * 15, opts?.signal);
   }
+  if (aborted()) { h.onAbort?.(); return; }
   h.onMeta({
     sources: demoAnswer.sources,
     citations_ok: true,
@@ -231,7 +257,7 @@ async function demoStream(h: StreamHandlers): Promise<void> {
 /** Network short-circuits used by lib/api when DEMO is on. */
 export const demoApi = {
   ask: () => delay(DEMO_VARIANT === "clarify" ? demoClarify : demoAnswer),
-  stream: (h: StreamHandlers) => demoStream(h),
+  stream: (h: StreamHandlers, opts?: AskStreamOpts) => demoStream(h, opts),
   clarify: () => delay(demoClarifyResolved),
   health: () => delay(demoHealth, 120),
   cycle: () => delay(demoCycle, 120),

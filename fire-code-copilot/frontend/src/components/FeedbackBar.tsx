@@ -17,7 +17,7 @@ import {
   type Source,
   type Rating,
 } from "../lib/api";
-import { ThumbUpIcon, ThumbDownIcon, CheckIcon } from "./icons";
+import { ThumbUpIcon, ThumbDownIcon, CheckIcon, CopyIcon } from "./icons";
 
 interface Props {
   question: string;
@@ -42,6 +42,25 @@ export default function FeedbackBar({
   // Short confirmation strings shown inline after a successful action.
   const [confirm, setConfirm] = useState<string | null>(null);
   const [verifiedNote, setVerifiedNote] = useState<string | null>(null);
+
+  // Brief "Copied" state after copying the raw answer markdown (~1.5s, then revert).
+  const [copied, setCopied] = useState(false);
+
+  // Whether the Clipboard API is usable here (absent in insecure/legacy contexts).
+  const canCopy =
+    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+
+  /** Copy the raw answer markdown to the clipboard. No-ops where the API is absent. */
+  async function copyAnswer() {
+    if (!canCopy) return;
+    try {
+      await navigator.clipboard.writeText(answer);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked (permissions/insecure context) — fail quietly */
+    }
+  }
 
   /** Record a 👍/👎. Optimistically mark it; revert on failure. */
   async function rate(rating: Rating) {
@@ -166,6 +185,20 @@ export default function FeedbackBar({
             <CheckIcon className="h-3.5 w-3.5" />
             {confirm}
           </span>
+        )}
+
+        {/* Copy the raw answer markdown — unobtrusive, right-aligned. Hidden where
+            the Clipboard API isn't available (e.g. insecure contexts). */}
+        {canCopy && (
+          <button
+            type="button"
+            onClick={copyAnswer}
+            aria-label="Copy answer"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-steel-400 transition active:scale-95 hover:text-steel-200"
+          >
+            {copied ? <CheckIcon className="h-3.5 w-3.5 text-verified-700" /> : <CopyIcon className="h-3.5 w-3.5" />}
+            {copied ? "Copied" : "Copy"}
+          </button>
         )}
       </div>
 

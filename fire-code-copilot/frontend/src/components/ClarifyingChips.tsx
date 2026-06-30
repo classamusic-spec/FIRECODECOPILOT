@@ -87,7 +87,7 @@ export default function ClarifyingChips({
                       onClick={() => pick(category, opt)}
                       aria-pressed={active}
                       className={
-                        "rounded-full border px-3 py-1 text-xs font-medium transition-colors " +
+                        "rounded-full border px-3 py-1 text-xs font-medium transition active:scale-95 " +
                         (active
                           ? "border-coral-500 bg-coral-500 text-white shadow-glow-sm"
                           : "border-white/15 bg-white/[0.04] text-steel-300 hover:border-coral-500/40 hover:text-steel-100")
@@ -123,7 +123,7 @@ export default function ClarifyingChips({
           type="button"
           onClick={() => onContinue(answers)}
           disabled={!canContinue}
-          className="rounded-lg bg-coral-500 px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:bg-coral-400 disabled:cursor-not-allowed disabled:bg-steel-700 disabled:text-steel-500 disabled:shadow-none"
+          className="rounded-lg bg-coral-500 px-4 py-2 text-sm font-semibold text-white shadow-glow transition active:scale-95 hover:bg-coral-400 disabled:cursor-not-allowed disabled:bg-steel-700 disabled:text-steel-500 disabled:shadow-none disabled:active:scale-100"
         >
           {busy ? "Working…" : "Continue"}
         </button>
