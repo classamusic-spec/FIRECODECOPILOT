@@ -12,7 +12,7 @@ SOURCES = [
 
 
 def _patch(monkeypatch, llm_reply: str):
-    monkeypatch.setattr(agent, "retrieve_scored", lambda q: SOURCES)
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: SOURCES)
     monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: llm_reply)
 
 
@@ -53,7 +53,7 @@ def test_refuses_to_fabricate(monkeypatch):
 
 
 def test_retrieve_mode_returns_sources_without_generation(monkeypatch):
-    monkeypatch.setattr(agent, "retrieve_scored", lambda q: SOURCES)
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: SOURCES)
     # llm.chat must NOT be called in retrieve mode.
     monkeypatch.setattr(agent.llm, "chat",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not generate")))

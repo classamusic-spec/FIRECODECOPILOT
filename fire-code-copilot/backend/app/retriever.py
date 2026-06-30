@@ -9,6 +9,7 @@ from .settings import settings
 from .reranker import rerank
 from . import embeddings  # provider-agnostic embed(); see embeddings.py
 from .sections import relates
+from .query import expand_query
 
 
 def _client():
@@ -31,7 +32,9 @@ def retrieve_scored(query: str, *, collection: str | None = None):
     coll_name = collection or settings.active_collection
     coll = _client().get_collection(coll_name)
 
-    qvec = embeddings.embed([query], input_type="query")[0]
+    # Embed the EXPANDED query (occupancy codes/acronyms spelled out) for recall; rerank below
+    # uses the marshal's original wording for precision.
+    qvec = embeddings.embed([expand_query(query)], input_type="query")[0]
     res = coll.query(
         query_embeddings=[qvec],
         n_results=settings.retrieve_before_rerank,

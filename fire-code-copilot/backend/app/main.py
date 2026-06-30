@@ -28,7 +28,8 @@ def health():
 @app.post("/ask")
 def ask(req: AskRequest):
     res = agent_ask(req.question, mode=req.mode, building_context=req.building_context,
-                    active_cycle_block=active_cycle_block(), deep=req.deep, provider=req.provider)
+                    active_cycle_block=active_cycle_block(), deep=req.deep, provider=req.provider,
+                    collection=req.collection)
     return result_dict(res)
 
 
@@ -38,7 +39,7 @@ def clarify(req: ClarifyRequest):
     building context and re-ask."""
     ctx = "\n".join(c for c in (req.building_context, req.answers) if c.strip())
     res = agent_ask(req.question, building_context=ctx, active_cycle_block=active_cycle_block(),
-                    deep=req.deep, provider=req.provider)
+                    deep=req.deep, provider=req.provider, collection=req.collection)
     return result_dict(res)
 
 
@@ -46,6 +47,13 @@ def clarify(req: ClarifyRequest):
 def ingest(req: IngestRequest):
     from .ingest import ingest as run_ingest
     return run_ingest(force=req.force)
+
+
+@app.get("/collections")
+def collections():
+    """List the indexed editions/cycles (one Chroma collection each) + which is active."""
+    from .ingest import list_collections
+    return {"active": settings.active_collection, "collections": list_collections()}
 
 
 @app.post("/feedback")

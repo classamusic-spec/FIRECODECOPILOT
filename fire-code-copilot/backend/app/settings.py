@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     retrieve_before_rerank: int = 20
     keep_after_rerank: int = 6
 
+    # --- Query expansion (recall) ---
+    expand_queries: bool = True                      # spell out occupancy codes/acronyms before embedding
+
     # --- Citation safety ---
     validate_citations: bool = True
 

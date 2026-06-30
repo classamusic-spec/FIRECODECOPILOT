@@ -9,6 +9,7 @@ class AskRequest(BaseModel):
     building_context: str = ""      # occupancy, new/existing, type, height, area, sprinklered...
     deep: bool = False              # escalate to DEEP_PROVIDER/DEEP_MODEL for hard questions
     provider: str | None = None     # override generation backend: "local" | "anthropic"
+    collection: str | None = None   # query a specific edition/cycle collection (default: active)
 
 
 class ClarifyRequest(BaseModel):
@@ -19,6 +20,7 @@ class ClarifyRequest(BaseModel):
     building_context: str = ""      # any context already gathered earlier in the thread
     deep: bool = False
     provider: str | None = None
+    collection: str | None = None
 
 
 class IngestRequest(BaseModel):

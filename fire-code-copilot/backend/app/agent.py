@@ -62,8 +62,8 @@ class AgentResult:
 
 def ask(question: str, *, mode: str = "answer", building_context: str = "",
         active_cycle_block: str = "", deep: bool = False,
-        provider: str | None = None) -> AgentResult:
-    scored = retrieve_scored(question)
+        provider: str | None = None, collection: str | None = None) -> AgentResult:
+    scored = retrieve_scored(question, collection=collection)
     chunks = [s.chunk for s in scored]
 
     if mode == "retrieve":
