@@ -21,25 +21,53 @@ Ask it questions in plain language instead of digging through code books.
 - 🗓️ Tracks the adopted code cycle and warns you when a new one (e.g., the 2026 CT codes)
   is due so you can update your books.
 
-## Quickstart (after Claude Code builds it)
+## Quickstart
 
 ```bash
 # 1. Put your code book PDFs here (this folder is gitignored — never committed):
 #    code_books/
+#    (Optional: describe each book in code_books/books.yaml — see books.yaml.example.)
 
 # 2. Backend
 cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp ../.env.example ../.env        # then fill in your keys
-python -m app.ingest              # index your code books (Phase 1)
+cp ../.env.example ../.env        # then adjust providers/keys (works fully local by default)
+
+# 2a. Look before you index — dry-run chunking on your real books and eyeball it:
+python -m app.ingest --inspect    # # chunks, sections, tables, amendment tags, no writes
+python -m app.ingest              # then index for real (Phase 1)
 uvicorn app.main:app --reload     # start the API
 
 # 3. Frontend
 cd ../frontend
 npm install
+cp .env.example .env              # VITE_API_BASE (defaults to http://localhost:8000)
 npm run dev                       # open the chat UI
 ```
+
+**No books yet? Smoke-test the whole pipeline** with synthetic, structurally-realistic
+fire-code PDFs (original text — not copyrighted):
+
+```bash
+python scripts/make_sample_pdf.py   # writes SAMPLE_*.pdf into code_books/ (gitignored)
+cd backend && python -m app.ingest --inspect && python -m app.ingest
+python -m pytest                    # 21 offline tests: chunking, citations, agent, retrieval, cycles
+```
+
+> **Tuning to your books:** `--inspect` is how you confirm section detection matches your PDFs.
+> If it flags *"many (preamble) chunks → section regex may not match this book's numbering,"*
+> adjust `SECTION_HEADING` / `SECTION_KEYWORD` in `backend/app/chunking.py` to your code's
+> numbering, then re-inspect. The defaults are tuned to ICC I-Code / NFPA conventions.
+
+## When a new code cycle arrives
+
+1. Drop the new edition's PDFs (and the Connecticut amendment document) into `code_books/`.
+2. In `config/code_cycles.yaml`, move `pending_cycle` → `active_cycle` and set the new
+   `pending_cycle` (verify dates with CT DAS). Point `ACTIVE_COLLECTION` in `.env` at the new
+   edition (one Chroma collection per edition keeps legacy editions queryable).
+3. Re-run `python -m app.ingest`. The old edition stays indexed for existing-building questions.
+4. Confirm with `bash scripts/check_containment.sh` that nothing copyrighted got staged.
 
 ## Project layout
 
