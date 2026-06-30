@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Base styles. Tailwind handles the rest; we set a few global defaults so the
+   app feels grounded and consistent before any component classes apply.
+--------------------------------------------------------------------------- */
+@layer base {
+  html {
+    /* Slightly tighter rhythm than browser default; smooth scrolling for the log. */
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-slate-50 text-ink antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Visible, consistent focus ring for keyboard users across the app. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-slate-900/70 ring-offset-1 ring-offset-slate-50;
+  }
+
+  /* Thin, unobtrusive scrollbars for the expandable source-text panels. */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: theme("colors.slate.300") transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+}
+
+@layer components {
+  /* Shared "markdown answer" typography. react-markdown emits plain HTML tags,
+     so we style them here rather than pulling in a typography plugin. */
+  .answer-prose {
+    @apply text-[15px] leading-relaxed text-ink;
+  }
+  .answer-prose > * + * {
+    @apply mt-3;
+  }
+  .answer-prose h1,
+  .answer-prose h2,
+  .answer-prose h3 {
+    @apply font-semibold text-ink;
+  }
+  .answer-prose h1 {
+    @apply text-lg;
+  }
+  .answer-prose h2 {
+    @apply text-base;
+  }
+  .answer-prose h3 {
+    @apply text-sm uppercase tracking-wide text-ink-muted;
+  }
+  .answer-prose a {
+    @apply text-slate-900 underline underline-offset-2 decoration-slate-400 hover:decoration-slate-900;
+  }
+  .answer-prose ul {
+    @apply list-disc space-y-1 pl-5;
+  }
+  .answer-prose ol {
+    @apply list-decimal space-y-1 pl-5;
+  }
+  .answer-prose code {
+    @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[13px] text-ink;
+  }
+  .answer-prose pre {
+    @apply overflow-x-auto rounded-md bg-slate-900 p-3 text-[13px] text-slate-100 scroll-thin;
+  }
+  .answer-prose pre code {
+    @apply bg-transparent p-0 text-slate-100;
+  }
+  .answer-prose blockquote {
+    @apply border-l-2 border-slate-300 pl-3 text-ink-muted;
+  }
+  .answer-prose table {
+    @apply w-full border-collapse text-sm;
+  }
+  .answer-prose th,
+  .answer-prose td {
+    @apply border border-slate-200 px-2 py-1 text-left align-top;
+  }
+  .answer-prose th {
+    @apply bg-slate-50 font-semibold;
+  }
+}

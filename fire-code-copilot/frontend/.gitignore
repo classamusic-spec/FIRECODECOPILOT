@@ -1,0 +1,16 @@
+# Frontend build & tooling artifacts (the repo root .gitignore also covers
+# node_modules/ and frontend/dist/; this is a local safety net).
+node_modules/
+dist/
+.vite/
+
+# TypeScript incremental build info (from `tsc -b`).
+*.tsbuildinfo
+
+# Emitted declaration files from config projects (should not be committed).
+vite.config.d.ts
+
+# Local env (never commit secrets; .env.example is the documented template).
+.env
+.env.*
+!.env.example
