@@ -8,6 +8,7 @@ from __future__ import annotations
 from .settings import settings
 from .reranker import rerank
 from . import embeddings  # provider-agnostic embed(); see embeddings.py
+from .sections import relates
 
 
 def _client():
@@ -70,27 +71,31 @@ def _verified_matches(query: str, qvec: list[float], k: int = 3) -> list[dict]:
 def _merge_amendments(chunks: list[dict], coll) -> list[dict]:
     """For any base-model section that CT amended, pull in the amendment and mark it controlling.
 
-    Relies on ingestion having tagged amendment chunks with metadata
-    {is_amendment: True, section: "<n>"}. We look up amendments for each retrieved section and
-    prepend them so the agent sees the controlling text first.
+    Relies on ingestion having tagged amendment chunks with {is_amendment: True, section: "<n>"}.
+    We match on section *relation*, not exact string equality, so an amendment to a parent
+    section (e.g. "903.2") still governs a retrieved child ("903.2.8"), and a newly-added CT
+    subsection ("903.2.8.4") surfaces for a query that retrieved its parent ("903.2.8"). This is
+    what makes the "CT version governs" rule robust to sub-section / range / formatting drift.
     """
     sections = {c["metadata"].get("section") for c in chunks if c["metadata"].get("section")}
     sections.discard("(preamble)")          # not a real section — don't merge a doc title as an amendment
     if not sections:
         return chunks
+
+    # Fetch ALL amendment chunks once (they're a small subset — one amendment document), then
+    # match by hierarchy in Python. Chroma's `$in` can only do exact equality, which is the bug.
     try:
-        amd = coll.get(
-            where={"$and": [{"is_amendment": True}, {"section": {"$in": list(sections)}}]},
-            include=["documents", "metadatas"],
-        )
+        amd = coll.get(where={"is_amendment": True}, include=["documents", "metadatas"])
     except Exception:
         return chunks  # ingestion may not have amendment tags yet
 
-    amendments = [
-        _format({**(m or {}), "controlling": True}, d)
-        for d, m in zip(amd.get("documents", []), amd.get("metadatas", []))
-    ]
-    # Amendments first (controlling), then base chunks, de-duped by (section, page).
+    amendments = []
+    for d, m in zip(amd.get("documents", []) or [], amd.get("metadatas", []) or []):
+        amd_section = (m or {}).get("section")
+        if amd_section and any(relates(amd_section, s) for s in sections):
+            amendments.append(_format({**(m or {}), "controlling": True}, d))
+
+    # Amendments first (controlling), then base chunks, de-duped by (section, page, is_amendment).
     seen, merged = set(), []
     for c in amendments + chunks:
         key = (c["metadata"].get("section"), c["metadata"].get("page"), c["metadata"].get("is_amendment"))

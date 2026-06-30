@@ -27,3 +27,25 @@ def test_section_in_metadata_only_still_verifies():
     # Citing a section present in metadata (even if phrased differently) verifies.
     check = citations.validate("See §903.2.11.6 for additional locations.", SOURCES)
     assert check.ok
+
+
+def test_substring_section_is_not_a_false_positive():
+    # "903.2" must NOT be considered present just because "903.2.8" was shown (whole-token check).
+    check = citations.validate("This falls under Section 903.2.", SOURCES)
+    assert not check.ok
+    assert "903.2" in " ".join(check.unverified)
+
+
+def test_grounded_quote_passes():
+    check = citations.validate(
+        'The code states: "An automatic sprinkler system shall be provided" in Group R.', SOURCES)
+    assert check.ok
+    assert check.quotes  # the quote was substantial enough to be checked
+
+
+def test_fabricated_quote_is_flagged():
+    check = citations.validate(
+        'Per §903.2.8, "sprinklers are required in every closet over two feet wide".', SOURCES)
+    assert not check.ok                     # section is real but the quote is invented
+    assert check.unverified_quotes
+    assert "UNVERIFIED QUOTE" in citations.annotate("…", check)
