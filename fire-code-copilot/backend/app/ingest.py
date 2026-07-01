@@ -73,6 +73,67 @@ def _ocr_cache_path(pdf: Path) -> Path:
     return Path(settings.data_dir) / "ocr_cache" / f"{_file_hash(pdf)}.json"
 
 
+def _page_text(page) -> str:
+    """Extract a page's text in READING ORDER, handling multi-column code pages.
+
+    PyMuPDF's default `get_text("text")` linearizes strictly top-to-bottom, which on a typical
+    two-column code page interleaves the columns (a left-column line, then the right-column line at
+    the same height, and so on) — splicing unrelated provisions together and corrupting citations.
+    Instead we read block-by-block: full-width blocks (headings/rules that span the page) in place,
+    and within each horizontal band the LEFT column fully, then the RIGHT column. Falls back to
+    plain extraction when the page isn't clearly two-column (so single-column books are unchanged).
+    """
+    try:
+        raw = page.get_text("blocks")
+    except Exception:
+        return page.get_text("text")
+    # blocks: (x0, y0, x1, y1, text, block_no, block_type). Keep non-empty TEXT blocks (type 0).
+    blocks = [b for b in raw if len(b) >= 5 and str(b[4]).strip() and (len(b) < 7 or b[6] == 0)]
+    if not blocks:
+        return page.get_text("text")
+
+    width = float(page.rect.width) or 1.0
+    mid = width / 2.0
+
+    def is_full(b):        # spans past the centerline → a full-width heading/rule, not a column
+        return (b[2] - b[0]) > 0.55 * width
+
+    def center(b):
+        return (b[0] + b[2]) / 2.0
+
+    lefts = [b for b in blocks if not is_full(b) and center(b) < mid]
+    rights = [b for b in blocks if not is_full(b) and center(b) >= mid]
+    # Not clearly two-column → read in natural (top, then left) order.
+    if not lefts or not rights:
+        ordered = sorted(blocks, key=lambda b: (round(b[1], 1), b[0]))
+        return "\n".join(str(b[4]).strip() for b in ordered)
+
+    # Two-column: scan top-to-bottom buffering each column; a full-width block flushes the current
+    # band (left column then right column) and is emitted in place.
+    out: list[str] = []
+    lbuf: list = []
+    rbuf: list = []
+
+    def flush():
+        for b in sorted(lbuf, key=lambda b: b[1]):
+            out.append(str(b[4]).strip())
+        for b in sorted(rbuf, key=lambda b: b[1]):
+            out.append(str(b[4]).strip())
+        lbuf.clear()
+        rbuf.clear()
+
+    for b in sorted(blocks, key=lambda b: (round(b[1], 1), b[0])):
+        if is_full(b):
+            flush()
+            out.append(str(b[4]).strip())
+        elif center(b) < mid:
+            lbuf.append(b)
+        else:
+            rbuf.append(b)
+    flush()
+    return "\n".join(t for t in out if t)
+
+
 def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
     """Extract (page_no, text) for every page, with a real fallback chain:
     PyMuPDF → pypdf → (optional) OCR for any near-empty page that is actually a scanned image.
@@ -95,7 +156,7 @@ def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
         ocr_cache = _load_json(cp) if cp.exists() else {}
 
     for i, page in enumerate(doc):
-        text = page.get_text("text")
+        text = _page_text(page)                    # reading-order aware (de-interleaves columns)
         if len(text.strip()) < _MIN_PAGE_CHARS:
             if pypdf_text is None:
                 pypdf_text = _pypdf_pages(pdf) or []
@@ -224,8 +285,18 @@ def ingest(force: bool = False) -> dict:
         ids = [f"{meta['book']}|{c['metadata']['page']}|{i}" for i, c in enumerate(chunks)]
         texts = [c["text"] for c in chunks]
         metas = [c["metadata"] for c in chunks]
+        for m in metas:
+            m["source"] = pdf.name                    # provenance + lets re-ingest purge cleanly
 
         coll = _coll(cname)
+        # Re-ingest hygiene: drop this file's PRIOR vectors before re-indexing it. Chunk ids are
+        # positional (…|page|i), so a corrected/updated book re-chunks to shifted ids and the old
+        # vectors would otherwise linger — leaving outdated code text retrievable and citable. We
+        # key the purge on the source filename so exactly this file's chunks are replaced.
+        try:
+            coll.delete(where={"source": pdf.name})
+        except Exception:
+            pass
         B = 64                                        # batch embed+upsert to keep memory flat
         for s in range(0, len(texts), B):
             vecs = embeddings.embed(texts[s:s + B], input_type="document")
