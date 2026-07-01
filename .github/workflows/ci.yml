@@ -54,7 +54,7 @@ jobs:
         working-directory: fire-code-copilot/backend
         run: python -m pytest -q
 
-      - name: Run retrieval + citation-safety eval (gate: >=90%, zero fabricated citations)
+      - name: "Run retrieval + citation-safety eval (gate: >=90%, zero fabricated citations)"
         working-directory: fire-code-copilot/backend
         run: python -m app.eval
 
