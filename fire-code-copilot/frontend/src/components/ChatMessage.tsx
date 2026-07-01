@@ -12,6 +12,7 @@
  *                          tag when escalated; each source via SourceCitation;
  *                          and FeedbackBar at the bottom.
  */
+import { useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Turn } from "../lib/types";
 import type { ConfidenceBand } from "../lib/api";
@@ -20,6 +21,13 @@ import FeedbackBar from "./FeedbackBar";
 import ClarifyingChips from "./ClarifyingChips";
 import AmendmentDiff from "./AmendmentDiff";
 import { WarningIcon, SparkIcon } from "./icons";
+import { makeCitationComponents } from "../lib/citations";
+
+/** A request to highlight a cited section in the sources (nonce re-triggers the scroll/flash). */
+export interface CiteTarget {
+  section: string;
+  nonce: number;
+}
 
 interface Props {
   turn: Turn;
@@ -72,6 +80,16 @@ function LoadingDots() {
 }
 
 export default function ChatMessage({ turn, onClarify }: Props) {
+  // Clicking a section reference in the answer highlights the matching source (below). The nonce
+  // increments on every click so re-clicking the same section re-scrolls and re-flashes it.
+  const [cite, setCite] = useState<CiteTarget | null>(null);
+  const citeSeq = useRef(0);
+  const onCite = (section: string) => {
+    citeSeq.current += 1;
+    setCite({ section, nonce: citeSeq.current });
+  };
+  const mdComponents = useMemo(() => makeCitationComponents(onCite), []);
+
   /* ----------------------------------------------------------- user turn -- */
   if (turn.role === "user") {
     return (
@@ -160,7 +178,7 @@ export default function ChatMessage({ turn, onClarify }: Props) {
 
                 {response.answer ? (
                   <div className="answer-prose">
-                    <ReactMarkdown>{response.answer}</ReactMarkdown>
+                    <ReactMarkdown components={mdComponents}>{response.answer}</ReactMarkdown>
                   </div>
                 ) : (
                   <p className="text-sm italic text-steel-400">No answer was returned for this question.</p>
@@ -178,7 +196,7 @@ export default function ChatMessage({ turn, onClarify }: Props) {
                     </p>
                     <div className="space-y-1.5">
                       {response.sources.map((s, i) => (
-                        <SourceCitation key={i} source={s} index={i + 1} />
+                        <SourceCitation key={i} source={s} index={i + 1} highlight={cite} />
                       ))}
                     </div>
                   </div>

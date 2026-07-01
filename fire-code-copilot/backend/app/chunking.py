@@ -122,10 +122,11 @@ def chunk_pages(pages: list[tuple[int, str]], book_meta: dict) -> list[dict]:
     cur_is_table = False
     cur_page = pages[0][0]
     cur_lines: list[str] = []
+    parent_seq = 0                        # monotonic id for a split section (parent-document retrieval)
 
     def flush():
         """Emit the accumulated section. Heading-only blocks become carried context instead."""
-        nonlocal cur_lines, carry
+        nonlocal cur_lines, carry, parent_seq
         body_lines = [l for l in cur_lines if l.strip()]
         if not body_lines:
             cur_lines = []
@@ -140,19 +141,29 @@ def chunk_pages(pages: list[tuple[int, str]], book_meta: dict) -> list[dict]:
         full = carry + body_lines
         carry = []
         text = "\n".join(full).strip()
-        for piece in _split_long(text):
+        pieces = _split_long(text)
+        # When a section is long enough to split, link the pieces with a shared parent id so the
+        # retriever can match a precise window but hand the model back the whole section (see
+        # retriever._expand_to_parents). Single-piece sections already ARE the whole section.
+        parent_id = None
+        if len(pieces) > 1:
+            parent_seq += 1
+            parent_id = f"{book_meta.get('book','?')}|{cur_section}|{cur_page}|{parent_seq}"
+        for part_idx, piece in enumerate(pieces):
             is_amd = bool(book_meta.get("is_amendment_doc")) or bool(AMENDMENT_MARKER.search(piece))
-            chunks.append({
-                "text": piece,
-                "metadata": {
-                    "book": book_meta.get("book", "?"),
-                    "edition": book_meta.get("edition", "?"),
-                    "section": cur_section,
-                    "page": cur_page,
-                    "is_amendment": is_amd,
-                    "is_table": cur_is_table,
-                },
-            })
+            meta = {
+                "book": book_meta.get("book", "?"),
+                "edition": book_meta.get("edition", "?"),
+                "section": cur_section,
+                "page": cur_page,
+                "is_amendment": is_amd,
+                "is_table": cur_is_table,
+            }
+            if parent_id:
+                meta["parent_id"] = parent_id
+                meta["part"] = part_idx
+                meta["n_parts"] = len(pieces)
+            chunks.append({"text": piece, "metadata": meta})
         cur_lines = []
 
     i = 0
