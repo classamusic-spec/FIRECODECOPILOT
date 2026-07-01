@@ -46,10 +46,48 @@ def _meta_for(pdf: Path, manifest: dict) -> dict:
     }
 
 
-def _read_pdf(pdf: Path) -> list[tuple[int, str]]:
+_MIN_PAGE_CHARS = 20   # below this a page is "empty" — try the fallback, then flag for OCR
+
+
+def _pypdf_pages(pdf: Path) -> list[str] | None:
+    """Per-page text via pypdf (the declared fallback extractor). None if pypdf can't read it."""
+    try:
+        from pypdf import PdfReader
+        return [(p.extract_text() or "") for p in PdfReader(str(pdf)).pages]
+    except Exception:
+        return None
+
+
+def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
+    """Extract (page_no, text) for every page, with a real fallback chain:
+    PyMuPDF → pypdf for any near-empty page. A page that stays empty AND has images is almost
+    certainly scanned/image-only — we flag it so the marshal knows it needs OCR (we never OCR
+    silently). Returns (pages, info) where info reports empty/image pages and whether pypdf helped.
+    """
     import fitz  # PyMuPDF
     doc = fitz.open(pdf)
-    return [(i + 1, page.get_text("text")) for i, page in enumerate(doc)]
+    pages: list[tuple[int, str]] = []
+    pypdf_text: list[str] | None = None
+    empty = image_only = 0
+    used_fallback = False
+
+    for i, page in enumerate(doc):
+        text = page.get_text("text")
+        if len(text.strip()) < _MIN_PAGE_CHARS:
+            if pypdf_text is None:
+                pypdf_text = _pypdf_pages(pdf) or []
+            alt = pypdf_text[i] if i < len(pypdf_text) else ""
+            if len(alt.strip()) >= _MIN_PAGE_CHARS:
+                text, used_fallback = alt, True
+            else:
+                empty += 1
+                if page.get_images():          # near-empty but has images → scanned page
+                    image_only += 1
+        pages.append((i + 1, text))
+
+    info = {"pages": len(pages), "empty_pages": empty, "image_only_pages": image_only,
+            "needs_ocr": image_only > 0, "used_pypdf_fallback": used_fallback}
+    return pages, info
 
 
 def _file_hash(p: Path) -> str:
@@ -95,7 +133,14 @@ def ingest(force: bool = False) -> dict:
             summary["skipped"].append(pdf.name)
             continue
 
-        chunks = chunk_pages(_read_pdf(pdf), meta)
+        pages, pdf_info = _read_pdf(pdf)
+        if pdf_info["needs_ocr"]:
+            summary.setdefault("needs_ocr", []).append(
+                {"file": pdf.name, "image_only_pages": pdf_info["image_only_pages"]})
+            print(f"  ⚠️  {pdf.name}: {pdf_info['image_only_pages']} image-only page(s) yielded no "
+                  f"text — this book is scanned and needs OCR. Run e.g. "
+                  f"`ocrmypdf in.pdf out.pdf` (brew install ocrmypdf), then re-ingest the OCR'd copy.")
+        chunks = chunk_pages(pages, meta)
         if not chunks:
             continue
 
@@ -173,7 +218,7 @@ def inspect(samples: int = 2) -> dict:
 
     for pdf in pdfs:
         meta = _meta_for(pdf, manifest)
-        pages = _read_pdf(pdf)
+        pages, pdf_info = _read_pdf(pdf)
         chunks = chunk_pages(pages, meta)
         sections = [c["metadata"]["section"] for c in chunks]
         preamble = sum(s == "(preamble)" for s in sections)
@@ -188,6 +233,13 @@ def inspect(samples: int = 2) -> dict:
         print(f"  distinct sections={len(set(sections))}  (preamble)-only chunks={preamble}")
         print(f"  chunk size words: min={sizes[0]} median={sizes[len(sizes)//2]} max={sizes[-1]}")
         flags = []
+        if pdf_info["needs_ocr"]:
+            flags.append(f"{pdf_info['image_only_pages']} image-only page(s) -> SCANNED book, needs OCR "
+                         "(text extraction returned nothing for them)")
+        if pdf_info["used_pypdf_fallback"]:
+            flags.append("used the pypdf fallback on some pages (PyMuPDF returned little/no text)")
+        if pdf_info["empty_pages"]:
+            flags.append(f"{pdf_info['empty_pages']} page(s) had no extractable text")
         if preamble > max(1, len(chunks) // 5):
             flags.append("many (preamble) chunks -> section regex may not match this book's numbering")
         if sizes[-1] >= TARGET_HINT:

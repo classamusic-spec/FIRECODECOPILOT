@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # --- Query expansion (recall) ---
     expand_queries: bool = True                      # spell out occupancy codes/acronyms before embedding
 
+    # --- Hybrid retrieval (dense + BM25 lexical, reciprocal-rank fused) ---
+    use_hybrid: bool = True                          # fuse a BM25 channel for exact-token lookups
+    bm25_candidates: int = 20                        # lexical candidates to fuse with the dense set
+
     # --- Citation safety ---
     validate_citations: bool = True
 

@@ -21,6 +21,7 @@ mcp                    # Model Context Protocol server (exposes the tool to Herm
 
 # --- RAG / vector store ---
 chromadb               # local, file-based vector database
+rank-bm25              # BM25 lexical channel for hybrid (dense + lexical) retrieval
 
 # --- PDF parsing ---
 pymupdf                # primary extractor (import as: fitz) — keeps layout/structure

@@ -281,6 +281,7 @@ Add it to your home screen for an app-like icon.
 | The website says "Could not reach the backend" | Make sure Terminal 1 (uvicorn) is still running. Remotely, check `VITE_API_BASE` matches your Tailscale IP. |
 | "No PDFs found" | Double-check `CODE_BOOKS_DIR` in `.env` is the real full path to your folder. |
 | Answers say "I couldn't find this in your loaded code books" | The topic may not be in the indexed books, or section detection needs tuning — run `python -m app.ingest --inspect` and share the output. |
+| Ingest warns a book "needs OCR" | That PDF is scanned images (no selectable text). OCR it first: `brew install ocrmypdf` then `ocrmypdf "book.pdf" "book-ocr.pdf"`, put the OCR'd copy in your code books folder, and re-ingest. |
 | Local model errors | Make sure `ollama serve` (or your model server) is running; or run `python -m app.llm --check`. |
 
 ## For developers

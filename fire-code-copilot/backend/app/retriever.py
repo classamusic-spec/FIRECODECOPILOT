@@ -5,9 +5,11 @@ show the marshal exactly which book/section/page each fact came from. Also merge
 amendments so the adopted/amended text is marked as controlling.
 """
 from __future__ import annotations
+from collections import defaultdict
 from .settings import settings
 from .reranker import rerank
 from . import embeddings  # provider-agnostic embed(); see embeddings.py
+from . import lexical     # BM25 channel for exact-token matches
 from .sections import relates
 from .query import expand_query
 
@@ -34,15 +36,23 @@ def retrieve_scored(query: str, *, collection: str | None = None):
 
     # Embed the EXPANDED query (occupancy codes/acronyms spelled out) for recall; rerank below
     # uses the marshal's original wording for precision.
-    qvec = embeddings.embed([expand_query(query)], input_type="query")[0]
+    expanded = expand_query(query)
+    qvec = embeddings.embed([expanded], input_type="query")[0]
     res = coll.query(
         query_embeddings=[qvec],
         n_results=settings.retrieve_before_rerank,
         include=["documents", "metadatas"],
     )
-    docs = res.get("documents", [[]])[0]
-    metas = res.get("metadatas", [[]])[0]
-    candidates = [_format(m or {}, d) for d, m in zip(docs, metas)]
+    dense_ids = res.get("ids", [[]])[0]
+    dense_docs = res.get("documents", [[]])[0]
+    dense_metas = res.get("metadatas", [[]])[0]
+
+    if settings.use_hybrid:
+        # Fuse dense + BM25 so exact tokens (section numbers, "NFPA 13") can't be missed.
+        lex = lexical.search(coll, expanded, settings.bm25_candidates)
+        candidates = _fuse(dense_ids, dense_docs, dense_metas, lex, settings.retrieve_before_rerank)
+    else:
+        candidates = [_format(m or {}, d) for d, m in zip(dense_docs, dense_metas)]
 
     candidates = _merge_amendments(candidates, coll)
 
@@ -52,6 +62,21 @@ def retrieve_scored(query: str, *, collection: str | None = None):
 
     scored = rerank(query, verified + candidates)
     return scored
+
+
+def _fuse(dense_ids, dense_docs, dense_metas, lex, limit, k: int = 60):
+    """Reciprocal-rank fusion of the dense and lexical rankings. Each list contributes
+    1/(k+rank) per item; we sort by the summed score and return the top `limit` candidates."""
+    info: dict[str, tuple] = {}          # id -> (text, metadata)
+    score: dict[str, float] = defaultdict(float)
+    for rank, did in enumerate(dense_ids):
+        score[did] += 1.0 / (k + rank + 1)
+        info.setdefault(did, (dense_docs[rank], dense_metas[rank] or {}))
+    for rank, item in enumerate(lex):
+        score[item["id"]] += 1.0 / (k + rank + 1)
+        info.setdefault(item["id"], (item["text"], item["metadata"]))
+    ordered = sorted(score, key=lambda i: score[i], reverse=True)[:limit]
+    return [_format(info[i][1], info[i][0]) for i in ordered]
 
 
 def _verified_matches(query: str, qvec: list[float], k: int = 3) -> list[dict]:

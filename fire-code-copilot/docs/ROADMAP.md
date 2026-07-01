@@ -10,6 +10,25 @@
 
 ---
 
+## 0. Recently shipped ✅
+
+Since this roadmap was written, the following have been implemented (tests in `backend/tests/`):
+
+- **N1 — hierarchy-aware amendment merge** (`sections.relates`, `retriever._merge_amendments`): equal/ancestor/descendant matching, not exact-string.
+- **N2 — quote-level citation validation** (`citations.py`): whole-token section match (kills the `903.2`⊂`903.2.8` false positive) + verbatim-quote grounding.
+- **N3 — per-edition collections** (`ingest.py`, `retriever`, `/collections`): one Chroma collection per cycle via `books.yaml` `collection:`.
+- **N4 — deterministic query expansion** (`query.py`): occupancy codes + code acronyms, appended before embedding.
+- **N6 — pypdf fallback + OCR-needed flag** (`ingest._read_pdf`): scanned/image-only pages are detected and flagged (never OCR'd silently).
+- **X1 — eval/regression harness** (`app/eval.py`, `eval/golden.yaml`): retrieval + amendment + citation-safety golden set (`python -m app.eval`), plus an **LLM-judge** tier (`--judge`).
+- **X2 — hybrid BM25 + dense retrieval** (`lexical.py`, `retriever._fuse`): reciprocal-rank fusion so exact tokens (section numbers, "NFPA 13") can't be missed.
+- **X3 — streaming responses** (`llm.chat_stream`, `agent.ask_stream`, `/ask/stream`, UI): token-by-token with post-stream citation validation.
+- **X7 — review-queue UI** (`ReviewQueue.tsx`): consumes `/review-queue`.
+- **Local-model swap** (GGUF/MLX) and the premium UI redesign also landed.
+
+Still open below: OCR pre-pass (X4), structured tables (X5), threads/persistence (X6), verified-answer edit/dedupe (X8), model-vs-CT diff (X9), confidence surfacing (X10), export (L3), and the packaging items.
+
+---
+
 ## 1. Executive summary (highest-leverage moves)
 
 - **Per-edition collections are documented but not built.** `ingest.ingest()` writes every PDF
