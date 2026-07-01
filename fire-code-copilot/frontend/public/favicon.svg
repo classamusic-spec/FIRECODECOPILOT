@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fire Code CoPilot favicon: a coral flame-in-shield on a deep-navy rounded
+     square, matching the BrandMark glyph in src/components/icons.tsx. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- deep-navy rounded square background -->
+  <rect width="64" height="64" rx="14" fill="#0D1B30"/>
+  <!-- scale the 24x24 BrandMark paths into the 64x64 tile (translate 8, scale ~2) -->
+  <g transform="translate(8 8) scale(2)" fill="none">
+    <!-- shield outline -->
+    <path
+      d="M12 2.2 4.5 5v6.4c0 5 3.4 8 7.5 10.4 4.1-2.4 7.5-5.4 7.5-10.4V5L12 2.2z"
+      fill="#FF5C42"
+      fill-opacity="0.16"
+      stroke="#FF5C42"
+      stroke-width="1.3"
+      stroke-linejoin="round"/>
+    <!-- flame -->
+    <path
+      d="M12 7c.7 1.5 2.6 2.3 2.6 4.6A2.7 2.7 0 0 1 12 14.3a2.7 2.7 0 0 1-2.6-2.7c0-.9.4-1.5.8-2 .2.5.5.8.9 1 .1-1 .4-2.1.9-3.6z"
+      fill="#FF5C42"/>
+  </g>
+</svg>

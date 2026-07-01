@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Premium navy-cockpit base. The app sits on a deep navy canvas with a soft
+   coral glow (top) and a faint engineering grid — futuristic but calm.
+--------------------------------------------------------------------------- */
+@layer base {
+  html { scroll-behavior: smooth; }
+
+  body {
+    @apply text-steel-200 antialiased;
+    background-color: #05090f;
+    /* layered: a coral glow up top, a cool navy depth glow, then a fine grid */
+    background-image:
+      radial-gradient(900px 520px at 78% -8%, rgba(255, 92, 66, 0.16), transparent 60%),
+      radial-gradient(820px 600px at 8% 6%, rgba(30, 62, 99, 0.45), transparent 62%),
+      linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+    background-attachment: fixed;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-coral-500/70 ring-offset-2;
+    --tw-ring-offset-color: #070d1a;
+  }
+
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(167, 180, 204, 0.25) transparent; }
+  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { @apply rounded-full; background: rgba(167, 180, 204, 0.22); }
+  .scroll-thin::-webkit-scrollbar-thumb:hover { background: rgba(167, 180, 204, 0.38); }
+}
+
+@layer components {
+  /* Frosted-glass panel: the core surface language of the app. */
+  .glass {
+    @apply rounded-2xl border border-white/10 bg-white/[0.045] backdrop-blur-xl;
+    box-shadow: 0 16px 50px -20px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  }
+  .glass-inset {
+    @apply rounded-xl border border-white/[0.07];
+    background: rgba(5, 9, 15, 0.55);
+  }
+
+  /* Markdown answer typography, tuned for light text on the dark glass card. */
+  .answer-prose { @apply text-[15px] leading-relaxed text-steel-100; }
+  .answer-prose > * + * { @apply mt-3; }
+  .answer-prose h1, .answer-prose h2, .answer-prose h3 { @apply font-semibold tracking-tight text-white; }
+  .answer-prose h1 { @apply text-lg; }
+  .answer-prose h2 { @apply text-base; }
+  .answer-prose h3 { @apply text-sm uppercase tracking-wide text-coral-300; }
+  .answer-prose strong { @apply font-semibold text-white; }
+  .answer-prose a { @apply text-coral-300 underline decoration-coral-500/40 underline-offset-2 hover:decoration-coral-400; }
+  .answer-prose ul { @apply list-disc space-y-1 pl-5 marker:text-coral-500/70; }
+  .answer-prose ol { @apply list-decimal space-y-1 pl-5 marker:text-steel-400; }
+  .answer-prose code { @apply rounded bg-white/10 px-1 py-0.5 font-mono text-[13px] text-coral-200; }
+  .answer-prose pre { @apply overflow-x-auto rounded-lg border border-white/10 bg-navy-950 p-3 text-[13px] text-steel-100 scroll-thin; }
+  .answer-prose pre code { @apply bg-transparent p-0 text-steel-100; }
+  .answer-prose blockquote { @apply border-l-2 border-coral-500/50 pl-3 text-steel-300; }
+  .answer-prose table { @apply w-full border-collapse text-sm; }
+  .answer-prose th, .answer-prose td { @apply border border-white/10 px-2 py-1 text-left align-top; }
+  .answer-prose th { @apply bg-white/[0.04] font-semibold text-white; }
+}

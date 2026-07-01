@@ -1,0 +1,9 @@
+{
+  // Solution-style root config: holds only project references. `tsc -b` builds
+  // each referenced project (the app code and the Vite/node config) in order.
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}

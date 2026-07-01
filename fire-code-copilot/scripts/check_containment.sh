@@ -1,20 +1,39 @@
 #!/usr/bin/env bash
 # Fail loudly if any copyrighted / sensitive file is tracked by git.
 # Run after building and after every ingest:  bash scripts/check_containment.sh
+#
+# This guards Rule #1 (copyright containment): code books, extracted text,
+# embeddings, the vector store, feedback DB, and secrets must NEVER be tracked.
 set -euo pipefail
 
 echo "Checking that no copyrighted or sensitive files are tracked by git..."
 
-# Patterns that must NEVER be committed.
-PATTERNS=("code_books/" "data/" "extracted_text/" ".env" ".pdf" ".epub" ".sqlite" ".db")
+# Intentional, safe placeholders that ARE allowed to be tracked. These keep the
+# (otherwise-gitignored) code_books/ and data/ directories present in the repo.
+ALLOWLIST_REGEX='(^|/)(_PUT_PDFS_HERE\.txt|_GENERATED_AT_RUNTIME\.txt|\.env\.example)$|\.example$'
 
-tracked=$(git ls-files || true)
+# Dangerous patterns, matched against tracked file paths (extended regex).
+#   - anything under code_books/, data/, or extracted_text/
+#   - real PDFs/ebooks, the vector store, the feedback DB, and secrets
+PATTERNS=(
+  '(^|/)code_books/'
+  '(^|/)data/'
+  '(^|/)extracted_text/'
+  '\.(pdf|epub|mobi)$'
+  '\.(sqlite|sqlite3|db)$'
+  '(^|/)\.env($|\.)'
+  '(^|/)config/code_cycles\.yaml$'
+)
+
+# All tracked files, minus the explicit allowlist.
+tracked=$(git ls-files | grep -Ev "$ALLOWLIST_REGEX" || true)
 violations=0
 
 for p in "${PATTERNS[@]}"; do
-  if echo "$tracked" | grep -i -- "$p" >/dev/null 2>&1; then
-    echo "  ❌ VIOLATION: something matching '$p' is tracked by git!"
-    echo "$tracked" | grep -i -- "$p" | sed 's/^/      /'
+  hits=$(echo "$tracked" | grep -Ei -- "$p" || true)
+  if [ -n "$hits" ]; then
+    echo "  ❌ VIOLATION: tracked file(s) match '$p':"
+    echo "$hits" | sed 's/^/      /'
     violations=$((violations+1))
   fi
 done

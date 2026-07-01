@@ -1,16 +1,24 @@
 """Citation validator — the safety net that makes fabricated citations structurally hard.
 
-After the model drafts an answer, we extract every section it cited and confirm each one
-actually appears in the retrieved source chunks (by section metadata OR literal text match).
-Any citation we can't verify is flagged, not silently trusted. For fire-code work this matters
-more than any model upgrade: a wrong section number is worse than "I don't know."
+Two independent checks, because a wrong section number is worse than "I don't know":
+
+  1. SECTION grounding — every section the model cites must actually be present in the
+     retrieved sources, compared as a WHOLE token (so a cited "903.2" is NOT considered
+     present just because "903.2.8" was shown — that substring slip used to pass).
+  2. QUOTE grounding — any substantial passage the model puts in quotes must actually appear
+     in the retrieved source text. The agent prompt tells the model to quote the code verbatim;
+     this catches a real-looking quote that the model invented (correct section #, wrong words).
+
+Anything we can't verify is flagged, never silently trusted.
 """
 from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .sections import canonical, section_tokens
+
 # Matches common code-citation shapes:
-#   903.2.8   §1004.5   Section 1004.5   Table 509   NFPA 13   NFPA 101   IFC 903.2
+#   903.2.8   §1004.5   Section 1004.5   Table 509   NFPA 13   NFPA 101
 SECTION_RE = re.compile(
     r"""
     (?:
@@ -23,13 +31,21 @@ SECTION_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Text the model placed in straight or curly double quotes.
+QUOTE_RE = re.compile(r"[\"“]([^\"“”]{1,500})[\"”]")
+# A quote shorter than this (in words) is a term/label, not a claim worth grounding.
+MIN_QUOTE_WORDS = 6
+
 
 def _normalize(s: str) -> str:
-    """Strip keywords/punctuation so '§903.2.8', 'Section 903.2.8', '903.2.8' compare equal."""
-    s = re.sub(r"(?i)\b(section|sec\.?|table|chapter|chap\.?)\b", " ", s)
-    s = s.replace("§", " ")
-    s = re.sub(r"\s+", " ", s).strip().upper()
-    return s
+    """Canonical section form ('§903.2.8' / 'Section 903.2.8' / '903.2.8' -> '903.2.8')."""
+    return canonical(s)
+
+
+def _loose(text: str) -> str:
+    """Lowercase + collapse every run of non-alphanumerics to one space, for robust quote
+    containment that ignores punctuation, smart quotes, and line-wrapping differences."""
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
 def extract_citations(text: str) -> list[str]:
@@ -43,35 +59,53 @@ def extract_citations(text: str) -> list[str]:
     return out
 
 
+def extract_quotes(text: str) -> list[str]:
+    """Substantial quoted passages the model presented as verbatim code text."""
+    out = []
+    for m in QUOTE_RE.finditer(text):
+        q = m.group(1).strip()
+        if len(q.split()) >= MIN_QUOTE_WORDS:
+            out.append(q)
+    return out
+
+
 @dataclass
 class CitationCheck:
     cited: list[str] = field(default_factory=list)
     verified: list[str] = field(default_factory=list)
     unverified: list[str] = field(default_factory=list)
+    quotes: list[str] = field(default_factory=list)            # substantial quotes that were checked
+    unverified_quotes: list[str] = field(default_factory=list)  # quotes not found in the sources
 
     @property
     def ok(self) -> bool:
-        return not self.unverified
+        return not self.unverified and not self.unverified_quotes
 
 
 def validate(answer: str, source_chunks: list[dict]) -> CitationCheck:
-    """Check every citation in `answer` against the retrieved chunks.
+    """Check every cited section and every substantial quote in `answer` against the sources.
 
-    A citation is verified if its normalized form appears in any chunk's `section` metadata
-    OR literally in any chunk's text. Everything else is unverified (possible fabrication).
+    A section is verified if its canonical form equals a source chunk's `section` metadata OR a
+    section token that literally appears in some chunk's text (whole-token, not substring). A
+    quote is verified if it appears (punctuation-insensitively) in the retrieved source text.
     """
-    # Build a haystack of everything the model was actually shown.
-    sections = {_normalize(str(c.get("metadata", {}).get("section", ""))) for c in source_chunks}
-    sections.discard("")
-    text_blob = _normalize(" ".join(c.get("text", "") for c in source_chunks))
+    # Present sections: from metadata, plus every section number literally in the shown text.
+    present: set[str] = {_normalize(str(c.get("metadata", {}).get("section", ""))) for c in source_chunks}
+    present.discard("")
+    for c in source_chunks:
+        present |= section_tokens(c.get("text", ""))
+    source_loose = _loose(" ".join(c.get("text", "") for c in source_chunks))
 
     check = CitationCheck(cited=extract_citations(answer))
     for c in check.cited:
-        n = _normalize(c)
-        if n in sections or n in text_blob:
-            check.verified.append(c)
-        else:
-            check.unverified.append(c)
+        (check.verified if _normalize(c) in present else check.unverified).append(c)
+
+    for q in extract_quotes(answer):
+        check.quotes.append(q)
+        # Allow a trailing ellipsis on a quoted excerpt.
+        needle = _loose(q.rstrip(" .…"))
+        if needle and needle not in source_loose:
+            check.unverified_quotes.append(q)
     return check
 
 
@@ -79,10 +113,18 @@ def annotate(answer: str, check: CitationCheck) -> str:
     """If anything is unverified, append an explicit warning instead of hiding it."""
     if check.ok:
         return answer
-    flagged = ", ".join(check.unverified)
-    return (
-        f"{answer}\n\n"
-        f"⚠️ UNVERIFIED CITATION(S): {flagged}. These section references were not found in "
-        f"your loaded code books and may be incorrect. Verify directly in the adopted code "
-        f"before relying on them."
-    )
+    parts = [answer, ""]
+    if check.unverified:
+        parts.append(
+            f"⚠️ UNVERIFIED CITATION(S): {', '.join(check.unverified)}. These section references "
+            f"were not found in your loaded code books and may be incorrect. Verify directly in "
+            f"the adopted code before relying on them."
+        )
+    if check.unverified_quotes:
+        shown = "; ".join(f'“{q[:80]}…”' if len(q) > 80 else f'“{q}”'
+                          for q in check.unverified_quotes)
+        parts.append(
+            f"⚠️ UNVERIFIED QUOTE(S): {shown} — this wording was not found verbatim in the "
+            f"retrieved sources. Treat as paraphrase and confirm against the code text."
+        )
+    return "\n".join(parts)

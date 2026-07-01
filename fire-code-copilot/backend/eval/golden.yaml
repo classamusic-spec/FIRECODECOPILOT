@@ -1,0 +1,43 @@
+# Golden evaluation set — the regression guard for retrieval + amendment precedence.
+#
+# Runs against a SYNTHETIC corpus (no copyrighted text; see app/eval.py) so it's deterministic
+# and CI-safe. Each case asserts that retrieval surfaces the governing section, and where a
+# Connecticut amendment applies, that it comes back marked controlling. This is the offline,
+# no-LLM half of the PROJECT_SPEC acceptance bar; LLM answer-grading is a future extension that
+# needs a model + the marshal's real books.
+#
+# Add a case whenever you fix a retrieval/chunking bug, so it can't silently regress.
+
+cases:
+  - q: "When is a sprinkler system required for an existing Group R-2 on a change of occupancy?"
+    expect_section: "903.2.8.4"
+    expect_controlling_amendment: true
+
+  - q: "Are sprinklers required in a new Group R-2 building over three stories?"
+    expect_section: "903.2.8.1"
+
+  - q: "How must an automatic sprinkler system be installed under NFPA 13?"
+    expect_section: "903.3.1.1"
+
+  - q: "Fire alarm system requirements for a Group R-2 apartment building"
+    expect_section: "907.2.9"
+
+  - q: "Where are single- and multiple-station smoke alarms required in R-2?"
+    expect_section: "907.2.9.3"
+
+  - q: "Sprinkler system supervision and waterflow alarms"
+    expect_section: "903.4"
+
+  - q: "Where are automatic sprinkler systems required generally?"
+    expect_section: "903.2"
+
+  - q: "Table of additional required sprinkler system locations"
+    expect_section: "903.2.11.6"
+    expect_table: true
+
+  - q: "What did Connecticut change about Group R sprinkler requirements?"
+    expect_section: "903.2.8"
+    expect_controlling_amendment: true
+
+  - q: "Sprinklers throughout a building with a Group R fire area"
+    expect_section: "903.2.8"
