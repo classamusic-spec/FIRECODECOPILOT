@@ -1,2 +1,7 @@
 node_modules/
 dist/
+build/
+# Frozen standalone backend staged for bundling (rebuild with scripts/build-sidecar.sh).
+# Keep the folder (and its .gitkeep) so Tauri's resource path always exists; ignore the payload.
+src-tauri/resources/fcc-backend/*
+!src-tauri/resources/fcc-backend/.gitkeep
