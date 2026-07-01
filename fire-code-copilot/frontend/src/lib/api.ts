@@ -17,7 +17,7 @@ export const API_BASE: string =
 /* ------------------------------------------------------------------ Types -- */
 
 /** Generation backend toggle. `null` lets the backend use its configured default. */
-export type Provider = "local" | "anthropic" | null;
+export type Provider = "local" | "openai" | "anthropic" | null;
 
 /** Two backend behaviours: compose an answer, or just return grounded sources. */
 export type Mode = "answer" | "retrieve";

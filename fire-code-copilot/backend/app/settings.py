@@ -16,14 +16,20 @@ class Settings(BaseSettings):
 
     # --- Generation ---
     # "local"    = OpenAI-compatible server (LM Studio / mlx_lm.server / Ollama)
+    # "openai"   = the OpenAI API (or an OpenAI-compatible endpoint via OPENAI_BASE_URL)
+    # "anthropic"= Claude API
     # "llamacpp" = a local .gguf file loaded directly via llama-cpp-python
     # "mlx"      = an MLX model loaded directly via mlx_lm (Apple Silicon only)
-    # "anthropic"= Claude API
     generation_provider: str = "local"
     local_base_url: str = "http://localhost:1234/v1"
     local_model: str = "glm-5.2"
     anthropic_api_key: str = ""
     answer_model: str = "claude-sonnet-4-6"          # only used if provider == anthropic
+
+    # --- openai provider (the OpenAI API, or an OpenAI-compatible endpoint) ---
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o"
+    openai_base_url: str = ""                         # blank = api.openai.com; set for Azure/compatible
 
     # --- llamacpp provider (direct .gguf via llama-cpp-python) ---
     gguf_model_path: str = ""                        # path to a .gguf file (relative paths anchored to root)

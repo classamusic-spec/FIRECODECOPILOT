@@ -19,10 +19,23 @@ def test_routes_to_local(monkeypatch):
     assert calls
 
 
+def test_routes_to_openai(monkeypatch):
+    calls = _spy(monkeypatch, "_chat_openai")
+    assert llm.chat("sys", "usr", provider="openai") == "<_chat_openai>"
+    assert calls
+
+
 def test_routes_to_anthropic(monkeypatch):
     calls = _spy(monkeypatch, "_chat_anthropic")
     assert llm.chat("sys", "usr", provider="anthropic") == "<_chat_anthropic>"
     assert calls
+
+
+def test_openai_missing_key_raises(monkeypatch):
+    monkeypatch.setattr(llm.settings, "openai_api_key", "")
+    import pytest
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        llm._openai_client()
 
 
 def test_routes_to_llamacpp(monkeypatch):
@@ -104,3 +117,10 @@ def test_check_runs_for_anthropic(monkeypatch):
     monkeypatch.setattr(llm.settings, "generation_provider", "anthropic")
     out = llm.check()
     assert any("ANTHROPIC_API_KEY" in line for line in out)
+
+
+def test_check_runs_for_openai(monkeypatch):
+    monkeypatch.setattr(llm.settings, "generation_provider", "openai")
+    monkeypatch.setattr(llm.settings, "openai_api_key", "")
+    out = llm.check()
+    assert any("OPENAI_API_KEY" in line for line in out)

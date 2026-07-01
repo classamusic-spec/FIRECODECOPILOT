@@ -137,6 +137,16 @@ and with a local model *nothing* leaves at all.)
    ```
    Save and close.
 
+### 🟢 Or use OpenAI (cloud)
+1. Get an API key from <https://platform.openai.com/api-keys>.
+2. `open -e .env` and set:
+   ```
+   GENERATION_PROVIDER=openai
+   OPENAI_API_KEY=sk-...paste-your-key-here...
+   OPENAI_MODEL=gpt-4o
+   ```
+   Save and close.
+
 ### 🔒 Fully private — run the model locally on your Mac Studio
 Your Mac Studio is powerful enough to run a good model with **zero cloud**. Easiest local option:
 1. Install **Ollama**: `brew install ollama` then `ollama serve` (leave it running), and in
