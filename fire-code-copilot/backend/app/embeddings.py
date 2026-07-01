@@ -25,3 +25,15 @@ def _embed_voyage(texts: list[str], input_type: str) -> list[list[float]]:
     import voyageai
     vo = voyageai.Client(api_key=settings.voyage_api_key)
     return vo.embed(texts, model=settings.voyage_model, input_type=input_type).embeddings
+
+
+def is_ready() -> bool:
+    """Whether the embedder is ready to use without a cold load. Voyage (a hosted API) is always
+    'ready'; the local model must have been loaded (the first embed downloads it)."""
+    return settings.embedding_provider != "local" or _local_model is not None
+
+
+def warm() -> None:
+    """Force the local embedding model to load now (so the first real query isn't a silent hang)."""
+    if settings.embedding_provider == "local":
+        _embed_local(["warm up"])

@@ -23,8 +23,17 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/health")
 def health():
+    from .warm import status
     return {"ok": True, "jurisdiction": settings.jurisdiction,
-            "generation_provider": settings.generation_provider, "model": settings.local_model}
+            "generation_provider": settings.generation_provider, "model": settings.local_model,
+            "ready": status()}
+
+
+@app.post("/warm")
+def warm():
+    """Pre-load the local embedder (+ reranker) so the first question isn't a cold-start hang."""
+    from .warm import warm as run_warm
+    return run_warm()
 
 
 @app.post("/ask")

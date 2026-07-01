@@ -78,6 +78,18 @@ cd FIRECODECOPILOT/fire-code-copilot
 (From now on, every command assumes you're in this `fire-code-copilot` folder. If you open a new
 Terminal later, run `cd ~/FIRECODECOPILOT/fire-code-copilot` first.)
 
+> ### ⚡ Shortcut: one command does it all
+> Once the tools are installed (Step 1) and you've cloned (Step 2), you can skip Steps 3–7 and
+> just run:
+> ```bash
+> bash scripts/launch.sh
+> ```
+> The **first time**, it sets up everything and creates your `.env`, then stops and asks you to
+> fill in two things — your **code books folder** and a **model** (see Steps 4–5 below for what to
+> put). Run `bash scripts/launch.sh` **again** and it installs the rest, warms the models, starts
+> the API + web UI, and opens your browser. Press `Control-C` once to stop. The steps below explain
+> everything the launcher does, in case you'd rather do it by hand.
+
 ---
 
 ## Step 3 — Set up the "engine" (the backend)
