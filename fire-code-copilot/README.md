@@ -274,6 +274,10 @@ to see the model code beside the controlling CT amendment:
    `ACTIVE_COLLECTION` in `.env` to the new cycle name. Each cycle is its own searchable
    collection, so old editions stay available for existing-building questions.
 3. Re-run `cd backend && source .venv/bin/activate && python -m app.ingest`.
+   - **Updating an existing book** (fixing a scan, dropping in a corrected PDF)? Just re-run
+     ingest — the file's old chunks are purged and replaced, so outdated text can't linger and be
+     cited. *(One-time only: if your index predates this behavior, delete `data/chroma` once and
+     re-ingest to clear any stale chunks from earlier runs.)*
 4. Run `bash scripts/check_containment.sh` to confirm nothing copyrighted is tracked by git.
 
 ---
