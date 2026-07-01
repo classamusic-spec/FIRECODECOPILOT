@@ -22,10 +22,15 @@ Since this roadmap was written, the following have been implemented (tests in `b
 - **X1 — eval/regression harness** (`app/eval.py`, `eval/golden.yaml`): retrieval + amendment + citation-safety golden set (`python -m app.eval`), plus an **LLM-judge** tier (`--judge`).
 - **X2 — hybrid BM25 + dense retrieval** (`lexical.py`, `retriever._fuse`): reciprocal-rank fusion so exact tokens (section numbers, "NFPA 13") can't be missed.
 - **X3 — streaming responses** (`llm.chat_stream`, `agent.ask_stream`, `/ask/stream`, UI): token-by-token with post-stream citation validation.
-- **X7 — review-queue UI** (`ReviewQueue.tsx`): consumes `/review-queue`.
+- **X5 — structured tables** (`ingest._table_chunks`): ruled tables via PyMuPDF `find_tables()` → markdown chunks.
+- **X6 — conversation persistence** (`lib/threads.ts`, `HistoryDrawer.tsx`): local threads, New chat + History.
+- **X7 — review-queue UI** (`ReviewQueue.tsx`): a two-tab "Marshal desk" (Review + Verified).
+- **X8 — verified-answer edit/dedupe/delete** (`feedback.py`, `/verified`): stable-id dedupe, list + delete, `governing_sections` from the UI.
+- **X9 — model-vs-CT amendment diff** (`AmendmentDiff.tsx`): base code beside the controlling amendment.
+- **X10 — confidence surfacing** (`agent._confidence`, confidence chip) + **auto-flag** low-confidence to the review queue.
 - **Local-model swap** (GGUF/MLX) and the premium UI redesign also landed.
 
-Still open below: OCR pre-pass (X4), structured tables (X5), threads/persistence (X6), verified-answer edit/dedupe (X8), model-vs-CT diff (X9), confidence surfacing (X10), export (L3), and the packaging items.
+Still open below: OCR pre-pass (X4), a cross-edition selector (X11), deep-mode re-retrieval (X12), export (L3), one-command launcher / desktop app (L1/L2), and the remaining packaging/scale items.
 
 ---
 

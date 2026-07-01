@@ -14,15 +14,49 @@
  */
 import ReactMarkdown from "react-markdown";
 import type { Turn } from "../lib/types";
+import type { ConfidenceBand } from "../lib/api";
 import SourceCitation from "./SourceCitation";
 import FeedbackBar from "./FeedbackBar";
 import ClarifyingChips from "./ClarifyingChips";
+import AmendmentDiff from "./AmendmentDiff";
 import { WarningIcon, SparkIcon } from "./icons";
 
 interface Props {
   turn: Turn;
   /** Called when the marshal answers a clarification for THIS turn. */
   onClarify: (turnId: string, answers: string) => void;
+}
+
+/**
+ * ConfidenceChip — a small reranker-confidence signal shown near the "Deep mode"
+ * tag. Renders nothing when the band is null (no reranker → no signal to show).
+ */
+function ConfidenceChip({ band }: { band: ConfidenceBand }) {
+  if (!band) return null;
+  const styles: Record<"low" | "medium" | "high", { chip: string; dot: string; label: string }> = {
+    high: {
+      chip: "border-verified-500/30 bg-verified-500/15 text-verified-700",
+      dot: "bg-verified-500",
+      label: "High",
+    },
+    medium: {
+      chip: "border-white/10 bg-white/10 text-steel-300",
+      dot: "bg-steel-400",
+      label: "Medium",
+    },
+    low: {
+      chip: "border-coral-500/40 bg-coral-500/10 text-coral-200",
+      dot: "bg-coral-400",
+      label: "Low",
+    },
+  };
+  const s = styles[band];
+  return (
+    <span className={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider " + s.chip}>
+      <span className={"h-1.5 w-1.5 rounded-full " + s.dot} />
+      Confidence: {s.label}
+    </span>
+  );
 }
 
 /** Three-dot pulse used while an answer is generating. */
@@ -96,11 +130,14 @@ export default function ChatMessage({ turn, onClarify }: Props) {
               />
             ) : (
               <>
-                {response.escalated && (
-                  <div className="mb-2.5">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-coral-500/30 bg-coral-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-coral-300">
-                      <SparkIcon className="h-3 w-3" /> Deep mode
-                    </span>
+                {(response.escalated || response.confidence_band) && (
+                  <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+                    {response.escalated && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-coral-500/30 bg-coral-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-coral-300">
+                        <SparkIcon className="h-3 w-3" /> Deep mode
+                      </span>
+                    )}
+                    <ConfidenceChip band={response.confidence_band} />
                   </div>
                 )}
 
@@ -128,6 +165,10 @@ export default function ChatMessage({ turn, onClarify }: Props) {
                 ) : (
                   <p className="text-sm italic text-steel-400">No answer was returned for this question.</p>
                 )}
+
+                {/* Model-vs-CT amendment diff — surfaced above the flat Sources
+                    list; returns null (renders nothing) when there are no pairs. */}
+                <AmendmentDiff sources={response.sources} />
 
                 {response.sources.length > 0 && (
                   <div className="mt-4">

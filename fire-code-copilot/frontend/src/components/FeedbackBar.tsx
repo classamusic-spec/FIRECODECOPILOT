@@ -110,6 +110,22 @@ export default function FeedbackBar({
     }
   }
 
+  /**
+   * The distinct "real" governing sections behind this answer: the metadata.section
+   * values from the sources, minus falsies, the "(preamble)" placeholder, and any
+   * verified-library entries (those aren't primary-source sections).
+   */
+  function governingSections(): string[] {
+    const seen = new Set<string>();
+    for (const s of sources) {
+      const m = s.metadata ?? {};
+      const sec = m.section;
+      if (!sec || sec === "(preamble)" || m.verified) continue;
+      seen.add(sec);
+    }
+    return [...seen];
+  }
+
   /** Promote the corrected text into the Verified Answer Library. */
   async function saveVerified() {
     const corrected = correction.trim();
@@ -120,7 +136,8 @@ export default function FeedbackBar({
       const res = await verifyAnswer({
         question,
         corrected_answer: corrected,
-        // governing_sections is optional per the contract; we send none here.
+        // Attach the answer's governing sections so the library entry is pinned to them.
+        governing_sections: governingSections(),
       });
       const where = res.sections.length
         ? ` (§${res.sections.join(", §")})`

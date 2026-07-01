@@ -13,14 +13,18 @@ text so you can verify.
 ![Fire Code CoPilot — cited answer](docs/screenshots/01-hero-desktop.png)
 
 <details>
-<summary>More screenshots (sources, clarifying questions, review queue, mobile)</summary>
+<summary><b>More screenshots</b> — sources, amendment diff, confidence, clarifying questions, review/verified, streaming, mobile</summary>
 
 | | |
 |---|---|
-| Sources expanded — controlling CT amendment + verified | ![](docs/screenshots/02-hero-source-expanded.png) |
-| Asks clarifying questions when it matters | ![](docs/screenshots/03-clarify-desktop.png) |
-| Review queue of flagged answers | ![](docs/screenshots/06-review-queue.png) |
-| Mobile | ![](docs/screenshots/05-hero-mobile.png) |
+| **Sources** — click any citation to read the exact code text; controlling CT amendment (coral) + verified (green) | ![](docs/screenshots/02-hero-source-expanded.png) |
+| **Model-vs-CT amendment diff** — see the base model code beside the controlling Connecticut amendment | ![](docs/screenshots/11-amendment-diff.png) |
+| **Confidence** — a High/Medium/Low chip on every answer | ![](docs/screenshots/10-confidence-chip.png) |
+| **Asks clarifying questions** when the answer depends on specifics | ![](docs/screenshots/03-clarify-desktop.png) |
+| **Streaming** — answers type out live, with a Stop button | ![](docs/screenshots/07-streaming.png) |
+| **Review + Verified** — flagged questions and your confirmed answers, with delete | ![](docs/screenshots/12-verified-tab.png) |
+| **Empty / first run** | ![](docs/screenshots/04-empty-desktop.png) |
+| **Mobile** | ![](docs/screenshots/05-hero-mobile.png) |
 
 </details>
 
@@ -197,8 +201,22 @@ npm run dev
 It prints a link like `http://localhost:5173`. **Open that in your browser** and ask away —
 e.g. *"Is a sprinkler system required for an existing Group R-2 on a change of occupancy?"*
 
+**When it's running and you ask a question, it looks like this** (the answer types out live,
+cites the exact section, and shows a confidence chip):
+
+![Fire Code CoPilot running](docs/screenshots/10-confidence-chip.png)
+
+Click any **source** to read the exact code text, and expand the **Connecticut amendments** panel
+to see the model code beside the controlling CT amendment:
+
+![Model code vs Connecticut amendment](docs/screenshots/11-amendment-diff.png)
+
 🎉 That's it. To stop either piece, click its Terminal and press `Control + C`.
 
+> **Just want to see it first, with no setup?** Open the website with `?demo` on the end of the
+> URL (e.g. `http://localhost:5173/?demo`) — it runs on built-in sample data with no backend or
+> code books, so you can click around the whole UI.
+>
 > **Prefer not to use the website?** You can chat right in the Terminal instead:
 > `cd backend && source .venv/bin/activate && python -m app.cli`
 
@@ -206,13 +224,19 @@ e.g. *"Is a sprinkler system required for an existing Group R-2 on a change of o
 
 ## Using it day to day
 
-- **Ask** in plain English. If the answer depends on specifics (occupancy, sprinklered, new vs.
-  existing), it asks you first — tap the chips.
-- **Every claim shows its source.** Click a citation to read the exact code text. Coral = a
-  controlling **Connecticut amendment**; green = an answer **you verified** before.
+- **Ask** in plain English. Answers **stream in live**, and each one shows a **confidence** chip
+  (High/Medium/Low). If the answer depends on specifics (occupancy, sprinklered, new vs. existing),
+  it asks you first — tap the chips.
+- **Every claim shows its source.** Click a citation to read the exact code text. When a section
+  was amended, the **Connecticut amendments** panel shows the model code *beside* the controlling
+  CT text. Coral = controlling **Connecticut amendment**; green = an answer **you verified** before.
 - **Teach it.** 👍/👎 each answer. Hit "Correct this" to fix one, and "Save as verified answer"
-  so the same question comes back right next time. The **Review** button (top-right) shows
-  everything you flagged.
+  so the same question comes back right next time. The **Review** button (top-right) opens the
+  *Marshal desk*: a **Review** tab (everything you flagged — weak answers auto-appear here) and a
+  **Verified** tab (your confirmed answers, which you can delete if they go stale).
+- **Keep your conversations.** They're saved locally — **New chat** starts a fresh one, and
+  **History** lists your past conversations (nothing leaves your machine). Copy any answer with the
+  **Copy** button, or press **⌘K** to jump to the question box.
 
 ## When you add books or a new code cycle arrives
 

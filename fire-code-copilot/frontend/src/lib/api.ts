@@ -43,6 +43,9 @@ export interface Source {
   metadata: SourceMetadata;
 }
 
+/** Reranker confidence bucket. `null` when there is no reranker signal. */
+export type ConfidenceBand = "low" | "medium" | "high" | null;
+
 /** The unified response shape returned by /ask and /clarify (AgentResult). */
 export interface AskResponse {
   mode: string;
@@ -55,6 +58,10 @@ export interface AskResponse {
   /** map of category -> quick-pick chip labels, e.g. { Occupancy: ["R-2","B"] } */
   chips: Record<string, string[]>;
   escalated: boolean;
+  /** reranker confidence score, or null when there is no reranker signal */
+  confidence: number | null;
+  /** bucketed confidence, or null when there is no reranker signal */
+  confidence_band: ConfidenceBand;
 }
 
 /** Request body for POST /ask. */
@@ -136,6 +143,16 @@ export interface ReviewQueue {
   items: ReviewItem[];
 }
 
+/** One entry in the Verified Answer Library (GET /verified). */
+export interface VerifiedItem {
+  id: string;
+  question: string;
+  answer: string;
+  sections: string[];
+  edition: string;
+  verified_at: string;
+}
+
 /* -------------------------------------------------------------- Internals -- */
 
 /** Error carrying the HTTP status, so callers can branch on it if needed. */
@@ -208,6 +225,8 @@ export interface StreamHandlers {
     unverified: string[];
     answer_suffix: string;
     escalated: boolean;
+    confidence: number | null;
+    confidence_band: ConfidenceBand;
   }) => void;
   /** an `error` event, or a network/HTTP failure */
   onError: (message: string) => void;
@@ -288,6 +307,8 @@ export async function askStream(
           unverified: (ev.unverified as string[]) ?? [],
           answer_suffix: String(ev.answer_suffix ?? ""),
           escalated: Boolean(ev.escalated),
+          confidence: typeof ev.confidence === "number" ? ev.confidence : null,
+          confidence_band: (ev.confidence_band as ConfidenceBand) ?? null,
         });
         break;
       case "error":
@@ -371,4 +392,18 @@ export function getHealth(): Promise<Health> {
 export function getReviewQueue(): Promise<ReviewQueue> {
   if (DEMO) return demoApi.review();
   return request<ReviewQueue>("/review-queue");
+}
+
+/** The Verified Answer Library: marshal-confirmed answers (GET /verified). */
+export function getVerified(): Promise<{ items: VerifiedItem[] }> {
+  if (DEMO) return demoApi.verified();
+  return request<{ items: VerifiedItem[] }>("/verified");
+}
+
+/** Remove a verified answer by id (DELETE /verified/{id}). */
+export function deleteVerified(id: string): Promise<{ deleted: boolean; id: string }> {
+  if (DEMO) return demoApi.deleteVerified(id);
+  return request<{ deleted: boolean; id: string }>(`/verified/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }

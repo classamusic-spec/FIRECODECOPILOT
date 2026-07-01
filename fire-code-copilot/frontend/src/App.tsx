@@ -16,10 +16,20 @@ import { useEffect, useRef, useState } from "react";
 import { askStream, clarify, getHealth, ApiError, type AskResponse, type Health, type Provider } from "./lib/api";
 import type { Turn, AssistantTurn } from "./lib/types";
 import { DEMO, DEMO_VARIANT, demoAnswer, demoClarify } from "./demo";
+import {
+  type Thread,
+  loadThreads,
+  loadActiveId,
+  saveActiveId,
+  upsertThread,
+  removeThread,
+  newThreadId,
+} from "./lib/threads";
 import ChatMessage from "./components/ChatMessage";
 import CycleBanner from "./components/CycleBanner";
 import ReviewQueue from "./components/ReviewQueue";
-import { SendIcon, StopIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon } from "./components/icons";
+import HistoryDrawer from "./components/HistoryDrawer";
+import { SendIcon, StopIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon, PlusIcon, ClockIcon } from "./components/icons";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}-${(_seq++).toString(36)}`;
@@ -60,6 +70,12 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
 
+  // Local conversation persistence (non-demo only). `threads` is the saved list;
+  // `activeId` is the conversation currently loaded into `turns`.
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeId, setActiveId] = useState<string>(() => newThreadId());
+  const [historyOpen, setHistoryOpen] = useState(false);
+
   // True while new content should auto-follow the user. Flips off when the user
   // scrolls up to read; the "Latest" pill appears so they can jump back down.
   const [atBottom, setAtBottom] = useState(true);
@@ -76,6 +92,34 @@ export default function App() {
       .catch(() => {/* header shows defaults if /health is unreachable */});
     return () => { alive = false; };
   }, []);
+
+  // On mount (NON-demo only): restore saved conversations and open the most recent.
+  // Demo mode never touches localStorage — it keeps the seeded showcase turns.
+  useEffect(() => {
+    if (DEMO) return;
+    const loaded = loadThreads();
+    setThreads(loaded);
+    if (loaded.length > 0) {
+      const savedId = loadActiveId();
+      const active = loaded.find((t) => t.id === savedId) ?? loaded[0]; // newest-first
+      setActiveId(active.id);
+      setTurns(active.turns);
+    }
+    // else: keep the fresh empty thread created in state initializers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist the active thread whenever its turns settle. We skip while a turn is
+  // still loading/streaming so we only ever save completed exchanges.
+  useEffect(() => {
+    if (DEMO) return;
+    const settling = turns.some(
+      (t) => t.role === "assistant" && (t.status === "loading" || t.status === "streaming"),
+    );
+    if (settling || turns.length === 0) return;
+    setThreads((prev) => upsertThread(prev, activeId, turns));
+    saveActiveId(activeId);
+  }, [turns, activeId]);
 
   // Smart auto-scroll: only follow new content when the user is already near the
   // bottom, so scrolling up to read isn't yanked back down on every token.
@@ -175,6 +219,8 @@ export default function App() {
                 clarifying_questions: q,
                 chips,
                 escalated,
+                confidence: null,
+                confidence_band: null,
               },
             }),
           // Finalize: the answer is the accumulated tokens + the meta suffix.
@@ -192,6 +238,8 @@ export default function App() {
                   clarifying_questions: [],
                   chips: {},
                   escalated: m.escalated,
+                  confidence: m.confidence ?? null,
+                  confidence_band: m.confidence_band ?? null,
                 };
                 return { ...turn, status: "done", response };
               }),
@@ -214,6 +262,8 @@ export default function App() {
                   clarifying_questions: [],
                   chips: {},
                   escalated: false,
+                  confidence: null,
+                  confidence_band: null,
                 };
                 return { ...turn, status: "done", response };
               }),
@@ -236,6 +286,40 @@ export default function App() {
   /** Stop button: abort the active stream; onAbort finalizes the turn. */
   function handleStop() {
     abortRef.current?.abort();
+  }
+
+  /** New chat: persist the current turns (if any), then open a fresh empty thread. */
+  function handleNewChat() {
+    if (sending) return; // don't switch away mid-stream
+    // The persistence effect already saved the current thread once it settled.
+    const id = newThreadId();
+    setActiveId(id);
+    setTurns([]);
+    saveActiveId(id);
+    setAtBottom(true);
+    textareaRef.current?.focus();
+  }
+
+  /** Load a saved conversation into the log. */
+  function handleSelectThread(id: string) {
+    if (sending) return;
+    const t = threads.find((x) => x.id === id);
+    if (!t) return;
+    setActiveId(id);
+    setTurns(t.turns);
+    saveActiveId(id);
+    setAtBottom(true);
+  }
+
+  /** Delete a saved conversation; if it was active, drop to a fresh empty thread. */
+  function handleDeleteThread(id: string) {
+    setThreads((prev) => removeThread(prev, id));
+    if (id === activeId) {
+      const fresh = newThreadId();
+      setActiveId(fresh);
+      setTurns([]);
+      saveActiveId(fresh);
+    }
   }
 
   async function handleClarify(turnId: string, answers: string) {
@@ -290,6 +374,36 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* New chat — save the current conversation and start a fresh one.
+                  Hidden in demo mode (persistence is off there). */}
+              {!DEMO && (
+                <button
+                  type="button"
+                  onClick={handleNewChat}
+                  disabled={sending}
+                  aria-label="New conversation"
+                  title="New conversation"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <PlusIcon className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">New</span>
+                </button>
+              )}
+
+              {/* History — open the saved-conversations drawer. */}
+              {!DEMO && (
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen(true)}
+                  aria-label="Open conversation history"
+                  title="History"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100"
+                >
+                  <ClockIcon className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">History</span>
+                </button>
+              )}
+
               {/* Open the flagged-questions review drawer. */}
               <button
                 type="button"
@@ -435,8 +549,18 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Flagged-questions review drawer (slide-over). */}
+      {/* Flagged-questions review + verified-answers drawer (slide-over). */}
       <ReviewQueue open={reviewOpen} onClose={() => setReviewOpen(false)} />
+
+      {/* Local conversation-history drawer (slide-over). */}
+      <HistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        threads={threads}
+        activeId={activeId}
+        onSelect={handleSelectThread}
+        onDelete={handleDeleteThread}
+      />
     </div>
   );
 }

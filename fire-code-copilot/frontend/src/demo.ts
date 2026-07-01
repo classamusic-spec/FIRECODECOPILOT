@@ -7,7 +7,7 @@
  * and for sharing a clickable preview. NONE of this is real legal text; the answer is
  * illustrative and the citations are synthetic.
  */
-import type { AskResponse, AskStreamOpts, CycleStatus, Health, ReviewItem, Source, StreamHandlers } from "./lib/api";
+import type { AskResponse, AskStreamOpts, CycleStatus, Health, ReviewItem, Source, StreamHandlers, VerifiedItem } from "./lib/api";
 
 const params = new URLSearchParams(
   typeof window !== "undefined" ? window.location.search : "",
@@ -107,6 +107,8 @@ export const demoAnswer: AskResponse = {
   clarifying_questions: [],
   chips: {},
   escalated: true,
+  confidence: 0.82,
+  confidence_band: "high",
 };
 
 export const demoClarify: AskResponse = {
@@ -127,6 +129,8 @@ export const demoClarify: AskResponse = {
     Sprinklered: ["Yes", "No", "Partial"],
   },
   escalated: false,
+  confidence: null,
+  confidence_band: null,
 };
 
 /** The answer returned after the marshal resolves the clarifying questions. */
@@ -251,8 +255,49 @@ async function demoStream(h: StreamHandlers, opts?: AskStreamOpts): Promise<void
     unverified: [],
     answer_suffix: "",
     escalated: demoAnswer.escalated,
+    confidence: demoAnswer.confidence,
+    confidence_band: demoAnswer.confidence_band,
   });
 }
+
+/**
+ * demoVerified — believable entries for the Verified Answer Library tab. As with
+ * the rest of this file, the text is illustrative, not authoritative legal content.
+ */
+export const demoVerified: VerifiedItem[] = [
+  {
+    id: "ver_903_r2",
+    question:
+      "Is a sprinkler system required for an existing Group R-2 in Hartford on a change of occupancy?",
+    answer:
+      "Yes. Under the CSFSC 2022 amendment §903.2.8.4, an existing Group R-2 requires an automatic " +
+      "sprinkler system throughout on a change of occupancy or substantial alteration — confirmed with " +
+      "the State Fire Marshal's office.",
+    sections: ["903.2.8.4", "903.2.8"],
+    edition: "csfsc_2022",
+    verified_at: "2026-06-24T13:10:00Z",
+  },
+  {
+    id: "ver_1005_egress",
+    question: "Egress width factors for a non-sprinklered B occupancy?",
+    answer:
+      "Non-sprinklered: use §1005.3 factors — 0.3 in/occupant for stairways and 0.2 in/occupant for " +
+      "other egress components. The reduced 0.2/0.15 factors apply only to sprinklered buildings.",
+    sections: ["1005.3"],
+    edition: "csbc_2022",
+    verified_at: "2026-06-18T09:42:00Z",
+  },
+  {
+    id: "ver_corridor_r2",
+    question: "Corridor fire-resistance rating for a sprinklered R-2 in CT?",
+    answer:
+      "Cite the adopted 2022 CSBC corridor table (not the generic IBC). For a sprinklered Group R-2 the " +
+      "required corridor rating is reduced — verify the sprinklered column of the adopted table.",
+    sections: ["1020.1"],
+    edition: "csbc_2022",
+    verified_at: "2026-06-11T15:05:00Z",
+  },
+];
 
 /** Network short-circuits used by lib/api when DEMO is on. */
 export const demoApi = {
@@ -264,4 +309,6 @@ export const demoApi = {
   feedback: () => delay({ id: 1, queued_for_review: false }),
   verify: () => delay({ id: "verified-demo", collection: "verified_answers", sections: ["903.2.8.4"] }),
   review: () => delay({ items: demoReview }),
+  verified: () => delay({ items: demoVerified }),
+  deleteVerified: (id: string) => delay({ deleted: true, id }),
 };
