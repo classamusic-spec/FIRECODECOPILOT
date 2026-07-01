@@ -154,6 +154,14 @@ export const ClockIcon = (p: IconProps) => (
   </svg>
 );
 
+export const TagIcon = (p: IconProps) => (
+  // A tag/label — used to file a conversation under a "matter" (address/permit).
+  <svg {...base(p)}>
+    <path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z" />
+    <line x1="7" y1="7" x2="7.01" y2="7" />
+  </svg>
+);
+
 /**
  * BrandMark — a flame inside a shield, the app's identity. Uses fill (not the
  * stroke base) so it reads as a solid coral glyph. Pass a className for size.

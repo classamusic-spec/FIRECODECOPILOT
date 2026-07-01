@@ -24,6 +24,8 @@ import {
   upsertThread,
   removeThread,
   newThreadId,
+  setThreadMatter,
+  knownMatters,
 } from "./lib/threads";
 import ChatMessage from "./components/ChatMessage";
 import CycleBanner from "./components/CycleBanner";
@@ -340,6 +342,11 @@ export default function App() {
     }
   }
 
+  /** File (or unfile) a conversation under a matter — a street address or permit number. */
+  function handleSetMatter(id: string, matter: string) {
+    setThreads((prev) => setThreadMatter(prev, id, matter));
+  }
+
   async function handleClarify(turnId: string, answers: string) {
     const turn = turns.find((t) => t.id === turnId);
     if (!turn || turn.role !== "assistant") return;
@@ -611,6 +618,8 @@ export default function App() {
         activeId={activeId}
         onSelect={handleSelectThread}
         onDelete={handleDeleteThread}
+        onSetMatter={handleSetMatter}
+        knownMatters={knownMatters(threads)}
       />
     </div>
   );

@@ -20,6 +20,15 @@ export interface Thread {
   createdAt: number;
   updatedAt: number;
   turns: Turn[];
+  /** Optional "matter" this conversation belongs to — a street address or permit #. Lets the
+   *  marshal group inspections/questions by job. Undefined = unfiled. */
+  matter?: string;
+}
+
+/** A group of conversations under one matter (or the unfiled group when `matter` is null). */
+export interface MatterGroup {
+  matter: string | null;
+  threads: Thread[];
 }
 
 let _seq = 0;
@@ -110,6 +119,53 @@ export function removeThread(threads: Thread[], id: string): Thread[] {
   const next = threads.filter((t) => t.id !== id);
   saveThreads(next);
   return next;
+}
+
+/**
+ * File a thread under a matter (or clear it with an empty string). Persists and returns the new
+ * list. Does not change `updatedAt`, so re-filing an old conversation doesn't jump it to the top.
+ */
+export function setThreadMatter(threads: Thread[], id: string, matter: string): Thread[] {
+  const clean = matter.trim();
+  const next = threads.map((t) =>
+    t.id === id ? { ...t, matter: clean || undefined } : t,
+  );
+  saveThreads(next);
+  return next;
+}
+
+/** Distinct existing matter labels (for autocomplete), most-recently-used first. */
+export function knownMatters(threads: Thread[]): string[] {
+  const seen: string[] = [];
+  for (const t of [...threads].sort((a, b) => b.updatedAt - a.updatedAt)) {
+    if (t.matter && !seen.includes(t.matter)) seen.push(t.matter);
+  }
+  return seen;
+}
+
+/**
+ * Group threads by matter for display: named matters first (each ordered by most-recent activity,
+ * and the groups themselves ordered by their most-recent thread), then the unfiled group last.
+ */
+export function groupByMatter(threads: Thread[]): MatterGroup[] {
+  const byMatter = new Map<string, Thread[]>();
+  const unfiled: Thread[] = [];
+  for (const t of threads) {
+    if (t.matter) {
+      const arr = byMatter.get(t.matter) ?? [];
+      arr.push(t);
+      byMatter.set(t.matter, arr);
+    } else {
+      unfiled.push(t);
+    }
+  }
+  const recency = (list: Thread[]) => Math.max(...list.map((t) => t.updatedAt));
+  const named: MatterGroup[] = [...byMatter.entries()]
+    .map(([matter, list]) => ({ matter, threads: list.sort((a, b) => b.updatedAt - a.updatedAt) }))
+    .sort((a, b) => recency(b.threads) - recency(a.threads));
+  const groups = named;
+  if (unfiled.length) groups.push({ matter: null, threads: unfiled.sort((a, b) => b.updatedAt - a.updatedAt) });
+  return groups;
 }
 
 /** Narrow an unknown value to a Thread (defensive against corrupt storage). */
