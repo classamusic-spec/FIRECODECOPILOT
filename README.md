@@ -28,13 +28,20 @@ you the exact source text so you can verify.
   code, and shows the model text **beside** the controlling amendment.
 - 🔖 **Cites the exact section and page**, and shows the quoted source so you can verify at a glance.
   It **refuses to fabricate** — every claim is checked against your books.
+- 🔗 **Click any citation to verify** — jump straight to the matching source and highlight the exact
+  line the answer is built on.
 - 🧭 **Asks the right follow-up questions** (occupancy, new vs. existing, sprinklered…) before
   committing, and shows a **confidence** chip on every answer.
+- 🗂️ **Organize by "matter"** — file conversations under a street address or permit # so a job's
+  questions stay together.
+- 📚 **Search a legacy edition** when you need it (existing-building work) with the cross-edition
+  selector — the active adopted edition stays the default.
 - 📈 **Learns from you** — 👍/👎 and "Save as verified answer" build a memory that sharpens future
   answers; weak answers auto-land in a review queue.
 - 🗓️ **Tracks the adopted code cycle** and warns you when a new one is due.
 - 🔒 **Private by default.** Runs fully local (embeddings + optional local LLM). Only your question
   and small retrieved snippets ever leave the machine — and with a local model, nothing does.
+- 🖥️ **Runs as a native desktop app** (Tauri) that embeds the backend — or in your browser.
 
 ## See it in 10 seconds (no setup)
 
@@ -47,13 +54,17 @@ cd fire-code-copilot/frontend && npm install && npm run dev
 
 ## Screenshots
 
-| Cited answer + confidence | Model-vs-CT amendment diff |
+| Cited answer + confidence | Click a citation → jump to & highlight the source |
 |---|---|
-| ![](fire-code-copilot/docs/screenshots/10-confidence-chip.png) | ![](fire-code-copilot/docs/screenshots/11-amendment-diff.png) |
-| **Expand any source** | **Asks clarifying questions** |
-| ![](fire-code-copilot/docs/screenshots/02-hero-source-expanded.png) | ![](fire-code-copilot/docs/screenshots/03-clarify-desktop.png) |
-| **Review + Verified ("Marshal desk")** | **Mobile** |
-| ![](fire-code-copilot/docs/screenshots/12-verified-tab.png) | ![](fire-code-copilot/docs/screenshots/05-hero-mobile.png) |
+| ![](fire-code-copilot/docs/screenshots/10-confidence-chip.png) | ![](fire-code-copilot/docs/screenshots/14-citation-highlight.png) |
+| **Model-vs-CT amendment diff** | **Saved "matters" — grouped by address / permit #** |
+| ![](fire-code-copilot/docs/screenshots/11-amendment-diff.png) | ![](fire-code-copilot/docs/screenshots/15-matters.png) |
+| **Search a legacy edition** | **Expand any source** |
+| ![](fire-code-copilot/docs/screenshots/16-edition-selector.png) | ![](fire-code-copilot/docs/screenshots/02-hero-source-expanded.png) |
+| **Asks clarifying questions** | **Review + Verified ("Marshal desk")** |
+| ![](fire-code-copilot/docs/screenshots/03-clarify-desktop.png) | ![](fire-code-copilot/docs/screenshots/12-verified-tab.png) |
+| **Export answer + citations** | **Mobile** |
+| ![](fire-code-copilot/docs/screenshots/13-export-pdf.png) | ![](fire-code-copilot/docs/screenshots/05-hero-mobile.png) |
 
 ## Get it running on your Mac Studio
 
