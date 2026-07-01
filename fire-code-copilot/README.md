@@ -259,6 +259,13 @@ to see the model code beside the controlling CT amendment:
 - **Keep your conversations.** They're saved locally — **New chat** starts a fresh one, and
   **History** lists your past conversations (nothing leaves your machine). Copy any answer with the
   **Copy** button, or press **⌘K** to jump to the question box.
+- **Searching an older cycle?** When you've indexed more than one edition, an **edition selector**
+  appears in the header so you can point a question at a legacy code cycle (handy for
+  existing-building work) instead of the active one.
+
+> **Prefer a real app in your Dock instead of a Terminal + browser tab?** There's a native
+> desktop wrapper that starts and stops the engine for you — open the app, it does the rest.
+> Setup and build steps are in [`desktop/README.md`](desktop/README.md).
 
 ## When you add books or a new code cycle arrives
 
@@ -327,7 +334,7 @@ Add it to your home screen for an app-like icon.
 | The website says "Could not reach the backend" | Make sure Terminal 1 (uvicorn) is still running. Remotely, check `VITE_API_BASE` matches your Tailscale IP. |
 | "No PDFs found" | Double-check `CODE_BOOKS_DIR` in `.env` is the real full path to your folder. |
 | Answers say "I couldn't find this in your loaded code books" | The topic may not be in the indexed books, or section detection needs tuning — run `python -m app.ingest --inspect` and share the output. |
-| Ingest warns a book "needs OCR" | That PDF is scanned images (no selectable text). OCR it first: `brew install ocrmypdf` then `ocrmypdf "book.pdf" "book-ocr.pdf"`, put the OCR'd copy in your code books folder, and re-ingest. |
+| Ingest warns a book "needs OCR" | That PDF is scanned images (no selectable text). Two options: **(a)** turn on the built-in OCR — `brew install tesseract`, `pip install -r backend/requirements-ocr.txt`, set `USE_OCR=true` in `.env`, and re-ingest; or **(b)** OCR it once yourself — `brew install ocrmypdf` then `ocrmypdf "book.pdf" "book-ocr.pdf"`, put the OCR'd copy in your code books folder, and re-ingest. |
 | Local model errors | Make sure `ollama serve` (or your model server) is running; or run `python -m app.llm --check`. |
 
 ## For developers
@@ -341,6 +348,7 @@ Architecture, the build plan, the improvement roadmap, and the test suite:
 | `docs/ROADMAP.md` | Prioritized improvements (Now / Next / Later) |
 | `docs/LOCAL_MODELS.md` | Running fully local (server / GGUF / MLX) |
 | `docs/COPYRIGHT_AND_LICENSING.md` | Legal guardrails |
+| `desktop/README.md` | Native desktop app (Tauri) — bundles the UI and manages the backend for you |
 
 ```bash
 cd backend && source .venv/bin/activate
