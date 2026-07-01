@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     # --- Table extraction ---
     extract_tables: bool = True                     # emit ruled tables as their own markdown chunks
 
+    # --- OCR (scanned books) ---
+    use_ocr: bool = False                           # OCR image-only pages (needs tesseract; see docs)
+    ocr_language: str = "eng"                        # Tesseract language pack(s), e.g. "eng"
+
     # Generation tuning
     temperature: float = 0.1                         # low for code work
 

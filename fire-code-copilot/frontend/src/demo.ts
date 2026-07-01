@@ -7,7 +7,7 @@
  * and for sharing a clickable preview. NONE of this is real legal text; the answer is
  * illustrative and the citations are synthetic.
  */
-import type { AskResponse, AskStreamOpts, CycleStatus, Health, ReviewItem, Source, StreamHandlers, VerifiedItem } from "./lib/api";
+import type { AskResponse, AskStreamOpts, CollectionsResponse, CycleStatus, Health, ReviewItem, Source, StreamHandlers, VerifiedItem } from "./lib/api";
 
 const params = new URLSearchParams(
   typeof window !== "undefined" ? window.location.search : "",
@@ -299,9 +299,23 @@ export const demoVerified: VerifiedItem[] = [
   },
 ];
 
+/**
+ * demoCollections — two stored code-edition cycles for the edition selector: the
+ * active 2022 cycle and a legacy 2018 cycle (for existing-building questions). As
+ * with the rest of this file, the numbers are illustrative, not authoritative.
+ */
+export const demoCollections: CollectionsResponse = {
+  active: "csfsc_2022",
+  collections: [
+    { name: "csfsc_2022", books: 2, chunks: 812, editions: ["2021", "2022"], active: true },
+    { name: "csfsc_2018", books: 2, chunks: 760, editions: ["2015", "2018"], active: false },
+  ],
+};
+
 /** Network short-circuits used by lib/api when DEMO is on. */
 export const demoApi = {
   ask: () => delay(DEMO_VARIANT === "clarify" ? demoClarify : demoAnswer),
+  collections: () => delay(demoCollections, 120),
   stream: (h: StreamHandlers, opts?: AskStreamOpts) => demoStream(h, opts),
   clarify: () => delay(demoClarifyResolved),
   health: () => delay(demoHealth, 120),

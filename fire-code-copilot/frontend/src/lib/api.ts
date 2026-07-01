@@ -71,6 +71,28 @@ export interface AskRequest {
   building_context?: string;
   deep?: boolean;
   provider?: Provider;
+  /** Which code-edition collection to search; omit/empty = the backend's active edition. */
+  collection?: string;
+}
+
+/** One selectable code-edition collection (a stored cycle) from GET /collections. */
+export interface Collection {
+  /** collection name / id (what you pass back as AskRequest.collection) */
+  name: string;
+  /** number of code books ingested, or null when unknown */
+  books: number | null;
+  /** number of retrievable chunks in the collection */
+  chunks: number;
+  /** the CT edition years this collection covers, e.g. ["2021","2022"] */
+  editions: string[];
+  /** true for the currently adopted collection */
+  active: boolean;
+}
+
+/** Response from GET /collections: the active collection name + the full list. */
+export interface CollectionsResponse {
+  active: string;
+  collections: Collection[];
 }
 
 /** Request body for POST /clarify. */
@@ -392,6 +414,12 @@ export function getHealth(): Promise<Health> {
 export function getReviewQueue(): Promise<ReviewQueue> {
   if (DEMO) return demoApi.review();
   return request<ReviewQueue>("/review-queue");
+}
+
+/** List the stored code-edition collections + which one is active (GET /collections). */
+export function getCollections(): Promise<CollectionsResponse> {
+  if (DEMO) return demoApi.collections();
+  return request<CollectionsResponse>("/collections");
 }
 
 /** The Verified Answer Library: marshal-confirmed answers (GET /verified). */

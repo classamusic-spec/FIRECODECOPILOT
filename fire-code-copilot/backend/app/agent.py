@@ -105,6 +105,13 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
     top_score = max((s.score for s in scored), default=0.0)
     auto_deep = settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
     use_deep = deep or auto_deep
+
+    # Deep mode also does a SECOND retrieval pass with a rewritten query (folding in the building
+    # context), then reranks the union — not just a model swap.
+    if use_deep and (rewrite := _deep_rewrite(question, building_context)):
+        scored = retrieve_scored(question, collection=collection, extra_queries=[rewrite])
+        chunks = [s.chunk for s in scored]
+
     conf, band = _confidence(scored)
 
     system = _system_prompt(active_cycle_block)
@@ -155,6 +162,11 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     top_score = max((s.score for s in scored), default=0.0)
     auto_deep = settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
     use_deep = deep or auto_deep
+
+    if use_deep and (rewrite := _deep_rewrite(question, building_context)):
+        scored = retrieve_scored(question, collection=collection, extra_queries=[rewrite])
+        chunks = [s.chunk for s in scored]
+
     conf, band = _confidence(scored)
 
     system = _system_prompt(active_cycle_block)
@@ -203,6 +215,14 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
            "answer_suffix": suffix, "escalated": use_deep,
            "confidence": conf, "confidence_band": band}
     yield {"type": "done"}
+
+
+def _deep_rewrite(question: str, building_context: str) -> str | None:
+    """The rewritten query for deep mode's second retrieval pass. Folding the building context
+    into the query pulls in chunks the bare question missed. Returns None when there's nothing to
+    add (deep then falls back to a model swap only)."""
+    ctx = (building_context or "").strip()
+    return f"{question} — building details: {ctx}" if ctx else None
 
 
 def _parse_clarification(draft: str) -> dict | None:

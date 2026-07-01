@@ -1,0 +1,12 @@
+# Rust / Cargo build output
+/target
+# Tauri-generated schemas & artifacts (regenerated on build)
+/gen
+# Generated app icons (run `npm run icons` to regenerate from icon.png)
+/icons/32x32.png
+/icons/128x128.png
+/icons/128x128@2x.png
+/icons/icon.icns
+/icons/icon.ico
+/icons/Square*Logo.png
+/icons/StoreLogo.png

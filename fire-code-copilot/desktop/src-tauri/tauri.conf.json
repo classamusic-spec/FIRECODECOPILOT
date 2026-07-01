@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Fire Code CoPilot",
+  "version": "1.0.0",
+  "identifier": "com.firecodecopilot.desktop",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../frontend run dev -- --port 5173",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm --prefix ../frontend run build",
+    "frontendDist": "../../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Fire Code CoPilot",
+        "width": 1200,
+        "height": 840,
+        "minWidth": 900,
+        "minHeight": 640,
+        "resizable": true,
+        "center": true,
+        "theme": "Dark",
+        "backgroundColor": "#0B1226"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Local-first fire-code research assistant.",
+    "longDescription": "Fire Code CoPilot — a local, copyright-contained RAG assistant for Connecticut fire-code research. Runs entirely on your machine; your code books never leave it."
+  }
+}

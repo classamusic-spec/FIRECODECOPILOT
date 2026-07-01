@@ -58,18 +58,41 @@ def _pypdf_pages(pdf: Path) -> list[str] | None:
         return None
 
 
+def _ocr_page(page, lang: str) -> str:
+    """OCR one page: render it to an image and run Tesseract. Lazy-imports the optional deps."""
+    import io
+    import pytesseract
+    from PIL import Image
+    pix = page.get_pixmap(dpi=200)
+    img = Image.open(io.BytesIO(pix.tobytes("png")))
+    return pytesseract.image_to_string(img, lang=lang)
+
+
+def _ocr_cache_path(pdf: Path) -> Path:
+    # Keyed by content hash so an edited PDF re-OCRs; lives under gitignored data/ (copyright-safe).
+    return Path(settings.data_dir) / "ocr_cache" / f"{_file_hash(pdf)}.json"
+
+
 def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
     """Extract (page_no, text) for every page, with a real fallback chain:
-    PyMuPDF → pypdf for any near-empty page. A page that stays empty AND has images is almost
-    certainly scanned/image-only — we flag it so the marshal knows it needs OCR (we never OCR
-    silently). Returns (pages, info) where info reports empty/image pages and whether pypdf helped.
+    PyMuPDF → pypdf → (optional) OCR for any near-empty page that is actually a scanned image.
+    OCR is opt-in (USE_OCR) and cached under data/ocr_cache so re-ingest doesn't re-OCR. A page
+    that stays empty AND has images is flagged so the marshal knows it needs OCR. Returns
+    (pages, info) with per-book extraction stats.
     """
     import fitz  # PyMuPDF
     doc = fitz.open(pdf)
     pages: list[tuple[int, str]] = []
     pypdf_text: list[str] | None = None
-    empty = image_only = 0
+    empty = image_only = ocr_pages = 0
     used_fallback = False
+
+    # OCR cache (only touched when OCR is enabled).
+    ocr_cache: dict = {}
+    ocr_cache_dirty = False
+    if settings.use_ocr:
+        cp = _ocr_cache_path(pdf)
+        ocr_cache = _load_json(cp) if cp.exists() else {}
 
     for i, page in enumerate(doc):
         text = page.get_text("text")
@@ -79,14 +102,28 @@ def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
             alt = pypdf_text[i] if i < len(pypdf_text) else ""
             if len(alt.strip()) >= _MIN_PAGE_CHARS:
                 text, used_fallback = alt, True
+            elif page.get_images():            # near-empty but has images → scanned page
+                if settings.use_ocr:
+                    key = str(i)
+                    if key not in ocr_cache:
+                        ocr_cache[key] = _ocr_page(page, settings.ocr_language)
+                        ocr_cache_dirty = True
+                    ocr_text = ocr_cache[key]
+                    if len(ocr_text.strip()) >= _MIN_PAGE_CHARS:
+                        text, ocr_pages = ocr_text, ocr_pages + 1
+                    else:
+                        empty += 1; image_only += 1
+                else:
+                    empty += 1; image_only += 1
             else:
                 empty += 1
-                if page.get_images():          # near-empty but has images → scanned page
-                    image_only += 1
         pages.append((i + 1, text))
 
+    if ocr_cache_dirty:
+        _save_json(_ocr_cache_path(pdf), ocr_cache)
+
     info = {"pages": len(pages), "empty_pages": empty, "image_only_pages": image_only,
-            "needs_ocr": image_only > 0, "used_pypdf_fallback": used_fallback}
+            "ocr_pages": ocr_pages, "needs_ocr": image_only > 0, "used_pypdf_fallback": used_fallback}
     return pages, info
 
 
@@ -273,9 +310,12 @@ def inspect(samples: int = 2) -> dict:
         print(f"  distinct sections={len(set(sections))}  (preamble)-only chunks={preamble}")
         print(f"  chunk size words: min={sizes[0]} median={sizes[len(sizes)//2]} max={sizes[-1]}")
         flags = []
+        if pdf_info.get("ocr_pages"):
+            flags.append(f"OCR'd {pdf_info['ocr_pages']} scanned page(s) (USE_OCR is on)")
         if pdf_info["needs_ocr"]:
-            flags.append(f"{pdf_info['image_only_pages']} image-only page(s) -> SCANNED book, needs OCR "
-                         "(text extraction returned nothing for them)")
+            hint = "enable USE_OCR (needs tesseract) or " if not settings.use_ocr else ""
+            flags.append(f"{pdf_info['image_only_pages']} image-only page(s) -> SCANNED book: {hint}"
+                         "OCR the file (ocrmypdf) and re-ingest")
         if pdf_info["used_pypdf_fallback"]:
             flags.append("used the pypdf fallback on some pages (PyMuPDF returned little/no text)")
         if pdf_info["empty_pages"]:

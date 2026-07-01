@@ -28,53 +28,53 @@ def retrieve(query: str, *, collection: str | None = None) -> list[dict]:
     return [s.chunk for s in retrieve_scored(query, collection=collection)]
 
 
-def retrieve_scored(query: str, *, collection: str | None = None):
-    """Like retrieve(), but returns the reranked chunks WITH their relevance scores so callers
-    (e.g. the agent's deep-mode hook) can gauge retrieval confidence."""
+def retrieve_scored(query: str, *, collection: str | None = None,
+                    extra_queries: list[str] | None = None):
+    """Return reranked chunks WITH scores. `extra_queries` runs additional query variants and
+    fuses everything (used by deep-mode's second retrieval pass — see agent._deep_rewrite);
+    reranking is always against the marshal's ORIGINAL wording for precision."""
     coll_name = collection or settings.active_collection
     coll = _client().get_collection(coll_name)
 
-    # Embed the EXPANDED query (occupancy codes/acronyms spelled out) for recall; rerank below
-    # uses the marshal's original wording for precision.
-    expanded = expand_query(query)
-    qvec = embeddings.embed([expanded], input_type="query")[0]
-    res = coll.query(
-        query_embeddings=[qvec],
-        n_results=settings.retrieve_before_rerank,
-        include=["documents", "metadatas"],
-    )
-    dense_ids = res.get("ids", [[]])[0]
-    dense_docs = res.get("documents", [[]])[0]
-    dense_metas = res.get("metadatas", [[]])[0]
+    queries = [query] + [q for q in (extra_queries or []) if q and q.strip()]
+    rankings: list[list[dict]] = []      # each entry is one ranked candidate list to fuse
+    primary_qvec = None
 
-    if settings.use_hybrid:
-        # Fuse dense + BM25 so exact tokens (section numbers, "NFPA 13") can't be missed.
-        lex = lexical.search(coll, expanded, settings.bm25_candidates)
-        candidates = _fuse(dense_ids, dense_docs, dense_metas, lex, settings.retrieve_before_rerank)
-    else:
-        candidates = [_format(m or {}, d) for d, m in zip(dense_docs, dense_metas)]
+    for i, q in enumerate(queries):
+        # Embed the EXPANDED query (occupancy codes/acronyms spelled out) for recall.
+        expanded = expand_query(q)
+        qvec = embeddings.embed([expanded], input_type="query")[0]
+        if i == 0:
+            primary_qvec = qvec
+        res = coll.query(query_embeddings=[qvec], n_results=settings.retrieve_before_rerank,
+                         include=["documents", "metadatas"])
+        ids = res.get("ids", [[]])[0]
+        docs = res.get("documents", [[]])[0]
+        metas = res.get("metadatas", [[]])[0]
+        rankings.append([{"id": _id, "text": d, "metadata": m or {}}
+                         for _id, d, m in zip(ids, docs, metas)])
+        if settings.use_hybrid:
+            # BM25 channel so exact tokens (section numbers, "NFPA 13") can't be missed.
+            rankings.append(lexical.search(coll, expanded, settings.bm25_candidates))
 
+    candidates = _fuse(rankings, settings.retrieve_before_rerank)
     candidates = _merge_amendments(candidates, coll)
 
-    # Pull in the marshal's Verified Answer Library (confirmed answers) so they surface, labeled,
-    # on similar questions. This is the compounding "memory" of the learning loop.
-    verified = _verified_matches(query, qvec)
+    # Pull in the marshal's Verified Answer Library (confirmed answers) so they surface, labeled.
+    verified = _verified_matches(query, primary_qvec)
 
-    scored = rerank(query, verified + candidates)
-    return scored
+    return rerank(query, verified + candidates)
 
 
-def _fuse(dense_ids, dense_docs, dense_metas, lex, limit, k: int = 60):
-    """Reciprocal-rank fusion of the dense and lexical rankings. Each list contributes
-    1/(k+rank) per item; we sort by the summed score and return the top `limit` candidates."""
+def _fuse(rankings: list[list[dict]], limit: int, k: int = 60):
+    """Reciprocal-rank fusion over any number of ranked lists (dense + BM25, across query
+    variants). Each list contributes 1/(k+rank) per item; sort by the summed score."""
     info: dict[str, tuple] = {}          # id -> (text, metadata)
     score: dict[str, float] = defaultdict(float)
-    for rank, did in enumerate(dense_ids):
-        score[did] += 1.0 / (k + rank + 1)
-        info.setdefault(did, (dense_docs[rank], dense_metas[rank] or {}))
-    for rank, item in enumerate(lex):
-        score[item["id"]] += 1.0 / (k + rank + 1)
-        info.setdefault(item["id"], (item["text"], item["metadata"]))
+    for ranking in rankings:
+        for rank, item in enumerate(ranking):
+            score[item["id"]] += 1.0 / (k + rank + 1)
+            info.setdefault(item["id"], (item["text"], item["metadata"]))
     ordered = sorted(score, key=lambda i: score[i], reverse=True)[:limit]
     return [_format(info[i][1], info[i][0]) for i in ordered]
 
