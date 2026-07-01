@@ -13,7 +13,7 @@
  * /clarify (original question + assembled answers) and replaces that turn.
  */
 import { useEffect, useRef, useState } from "react";
-import { askStream, clarify, getHealth, ApiError, type AskResponse, type Health, type Provider } from "./lib/api";
+import { askStream, clarify, getHealth, getCollections, ApiError, type AskResponse, type Collection, type Health, type Provider } from "./lib/api";
 import type { Turn, AssistantTurn } from "./lib/types";
 import { DEMO, DEMO_VARIANT, demoAnswer, demoClarify } from "./demo";
 import {
@@ -70,6 +70,12 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
 
+  // Stored code-edition collections + the marshal's current pick. `selectedCollection`
+  // holds a collection NAME when a legacy edition is chosen, or null for the active one.
+  // Best-effort: if the fetch fails or there's ≤1 collection, the selector stays hidden.
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
+
   // Local conversation persistence (non-demo only). `threads` is the saved list;
   // `activeId` is the conversation currently loaded into `turns`.
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -90,6 +96,17 @@ export default function App() {
     getHealth()
       .then((h) => alive && setHealth(h))
       .catch(() => {/* header shows defaults if /health is unreachable */});
+    return () => { alive = false; };
+  }, []);
+
+  // On mount (all modes — demo returns canned): load the stored code-edition
+  // collections so the marshal can search a legacy cycle. Best-effort: on any
+  // failure we simply leave `collections` empty and the selector never renders.
+  useEffect(() => {
+    let alive = true;
+    getCollections()
+      .then((r) => alive && setCollections(r.collections))
+      .catch(() => {/* selector stays hidden if /collections is unreachable */});
     return () => { alive = false; };
   }, []);
 
@@ -192,7 +209,8 @@ export default function App() {
 
     try {
       await askStream(
-        { question, building_context: ctx || undefined, deep, provider },
+        // `collection: undefined` = the backend's active edition; a name = a legacy cycle.
+        { question, building_context: ctx || undefined, deep, provider, collection: selectedCollection ?? undefined },
         {
           // Append each token to the in-progress text. Use the functional updater
           // so rapid back-to-back tokens compose instead of clobbering each other.
@@ -356,6 +374,16 @@ export default function App() {
       : health?.generation_provider === "openai" ? "OpenAI"
         : "Local";
 
+  // Only offer the edition picker when there's a real choice (≥2 collections).
+  const showEditionSelector = collections.length >= 2;
+  // A readable label for a collection: its edition years, e.g. "2021/2022".
+  const editionLabel = (c: Collection) => c.editions.join("/") || c.name;
+  // The currently-selected non-active collection, if any (drives the inline note).
+  const legacyCollection =
+    selectedCollection === null
+      ? null
+      : collections.find((c) => c.name === selectedCollection && !c.active) ?? null;
+
   return (
     <div className="flex h-screen flex-col">
       {/* ----------------------------------------------------------- Header */}
@@ -418,6 +446,17 @@ export default function App() {
                 Review
               </button>
 
+              {/* Code-edition selector — search a legacy cycle for existing-building
+                  questions. Only shown when the backend exposes ≥2 collections. */}
+              {showEditionSelector && (
+                <EditionSelector
+                  collections={collections}
+                  selected={selectedCollection}
+                  onChange={setSelectedCollection}
+                  label={editionLabel}
+                />
+              )}
+
               <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 sm:flex">
                 <span
                   className={"h-1.5 w-1.5 rounded-full " + (health?.ok ? "bg-verified-500 shadow-[0_0_8px] shadow-verified-500/70" : "bg-steel-500")}
@@ -463,6 +502,15 @@ export default function App() {
         )}
 
         <div className="mx-auto w-full max-w-3xl px-4 py-3">
+          {/* Off-active-edition notice — makes it obvious the answers won't come from
+              the currently adopted cycle (the system prompt already warns not to blend). */}
+          {legacyCollection && (
+            <div className="mb-2 inline-flex items-center gap-1.5 rounded-md border border-coral-500/30 bg-coral-500/10 px-2.5 py-1 text-xs font-medium text-coral-200 animate-rise">
+              <span className="h-1.5 w-1.5 rounded-full bg-coral-500 shadow-glow-sm" />
+              Searching the {editionLabel(legacyCollection)} edition — not the active cycle
+            </div>
+          )}
+
           {/* Collapsible building-context field. */}
           <div className="mb-2">
             <button
@@ -598,6 +646,52 @@ function ProviderToggle({ value, onChange }: { value: Provider; onChange: (p: Pr
         );
       })}
     </div>
+  );
+}
+
+/**
+ * EditionSelector — a compact, on-theme native <select> for choosing which stored
+ * code-edition collection to search. The value is the collection NAME; picking the
+ * active collection resolves to `null` (the caller then omits `collection`, so the
+ * backend uses its own active edition). Native select = keyboard-accessible for free.
+ */
+function EditionSelector({
+  collections,
+  selected,
+  onChange,
+  label,
+}: {
+  collections: Collection[];
+  selected: string | null;
+  onChange: (name: string | null) => void;
+  label: (c: Collection) => string;
+}) {
+  const active = collections.find((c) => c.active);
+  return (
+    <select
+      aria-label="Code edition"
+      title="Code edition to search"
+      // Empty value = the active edition (stored as null).
+      value={selected ?? ""}
+      onChange={(e) => onChange(e.target.value || null)}
+      className={
+        "glass cursor-pointer appearance-none rounded-full px-3 py-1.5 text-xs font-medium " +
+        "text-steel-200 transition-colors hover:text-steel-100 focus:outline-none " +
+        (selected ? "text-coral-200" : "")
+      }
+    >
+      {/* The active edition — no name passed, so the backend uses its default. */}
+      <option value="" className="bg-navy-900 text-steel-100">
+        {active ? `${label(active)} · active` : "Active edition"}
+      </option>
+      {collections
+        .filter((c) => !c.active)
+        .map((c) => (
+          <option key={c.name} value={c.name} className="bg-navy-900 text-steel-100">
+            {label(c)} (legacy)
+          </option>
+        ))}
+    </select>
   );
 }
 
