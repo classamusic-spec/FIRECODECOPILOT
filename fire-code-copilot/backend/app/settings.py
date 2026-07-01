@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     local_embedding_model: str = "BAAI/bge-m3"
     voyage_api_key: str = ""
     voyage_model: str = "voyage-law-2"
+    cache_embeddings: bool = True                     # reuse embeddings of identical text (data/embed_cache.sqlite)
+    # Optional role prefixes for asymmetric-search embedders (e.g. BGE v1.5). Default off (BGE-M3
+    # needs none); a v1.5 user can set the query prefix to the model's search instruction.
+    embedding_query_prefix: str = ""                 # prepended to queries only (input_type="query")
+    embedding_passage_prefix: str = ""               # prepended to documents only (input_type="document")
 
     # --- Reranker (two-stage retrieval) ---
     use_reranker: bool = True
