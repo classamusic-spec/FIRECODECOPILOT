@@ -28,6 +28,17 @@ def _get_reranker():
     return _reranker
 
 
+def is_ready() -> bool:
+    """Ready to rerank without a cold load. If the reranker is disabled it's trivially 'ready'."""
+    return (not settings.use_reranker) or _reranker is not None
+
+
+def warm() -> None:
+    """Force the cross-encoder to load now (first run downloads it)."""
+    if settings.use_reranker:
+        _get_reranker()
+
+
 @dataclass
 class Scored:
     chunk: dict          # {"text": str, "metadata": {...}}

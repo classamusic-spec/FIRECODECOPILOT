@@ -351,7 +351,10 @@ export default function App() {
     }
   }
 
-  const providerLabel = health?.generation_provider === "anthropic" ? "Anthropic" : "Local";
+  const providerLabel =
+    health?.generation_provider === "anthropic" ? "Anthropic"
+      : health?.generation_provider === "openai" ? "OpenAI"
+        : "Local";
 
   return (
     <div className="flex h-screen flex-col">
@@ -571,6 +574,7 @@ export default function App() {
 function ProviderToggle({ value, onChange }: { value: Provider; onChange: (p: Provider) => void }) {
   const opts: { label: string; val: Provider }[] = [
     { label: "Local", val: "local" },
+    { label: "OpenAI", val: "openai" },
     { label: "Anthropic", val: "anthropic" },
   ];
   return (

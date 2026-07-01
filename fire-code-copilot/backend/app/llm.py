@@ -1,8 +1,9 @@
-"""Provider-agnostic chat. One interface, four backends:
+"""Provider-agnostic chat. One interface, five backends:
   - "local":     any OpenAI-compatible server (LM Studio, mlx_lm.server, Ollama, vLLM)
+  - "openai":    the OpenAI API (or an OpenAI-compatible endpoint via OPENAI_BASE_URL)
+  - "anthropic": the Claude API
   - "llamacpp":  a local .gguf file loaded directly via llama-cpp-python (no server)
   - "mlx":       an MLX model loaded directly via mlx_lm (Apple Silicon only, no server)
-  - "anthropic": the Claude API (optional escalation)
 
 Keeping this thin means agent.py never cares which model is doing the work — so you can
 run fully local and only flip a config value to escalate a hard question to Claude.
@@ -28,6 +29,8 @@ def chat(system: str, user: str, *, provider: str | None = None,
 
     if provider == "local":
         return _chat_openai_compatible(system, user, model or settings.local_model, temperature)
+    if provider == "openai":
+        return _chat_openai(system, user, model or settings.openai_model, temperature)
     if provider == "llamacpp":
         return _chat_llamacpp(system, user, temperature)
     if provider == "mlx":
@@ -46,6 +49,8 @@ def chat_stream(system: str, user: str, *, provider: str | None = None,
 
     if provider == "local":
         yield from _stream_openai_compatible(system, user, model or settings.local_model, temperature)
+    elif provider == "openai":
+        yield from _stream_openai(system, user, model or settings.openai_model, temperature)
     elif provider == "llamacpp":
         yield from _stream_llamacpp(system, user, temperature)
     elif provider == "mlx":
@@ -72,6 +77,40 @@ def _stream_openai_compatible(system: str, user: str, model: str, temperature: f
     from openai import OpenAI
     client = OpenAI(base_url=settings.local_base_url, api_key="not-needed")
     stream = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=temperature,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = (chunk.choices[0].delta.content if chunk.choices else None) or ""
+        if delta:
+            yield delta
+
+
+def _openai_client():
+    """A real OpenAI (or OpenAI-compatible, e.g. Azure) client, keyed by OPENAI_API_KEY.
+    OPENAI_BASE_URL is optional — leave it blank to use api.openai.com."""
+    from openai import OpenAI
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is not set — add it to your .env (settings.openai_api_key).")
+    kwargs = {"api_key": settings.openai_api_key}
+    if settings.openai_base_url:
+        kwargs["base_url"] = settings.openai_base_url
+    return OpenAI(**kwargs)
+
+
+def _chat_openai(system: str, user: str, model: str, temperature: float) -> str:
+    resp = _openai_client().chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=temperature,
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _stream_openai(system: str, user: str, model: str, temperature: float) -> Iterator[str]:
+    stream = _openai_client().chat.completions.create(
         model=model,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         temperature=temperature,
@@ -260,6 +299,18 @@ def check() -> list[str]:
         if mid:
             lines.append("  Next: first use will download the model from HF if it's a repo id.")
 
+    elif p == "openai":
+        ok = _dep_importable("openai")
+        lines.append(f"  Dependency 'openai' installed: {ok}"
+                     if ok else
+                     "  Dependency 'openai': NOT installed  ->  pip install openai")
+        has_key = bool(settings.openai_api_key)
+        lines.append(f"  OPENAI_API_KEY present: {has_key}")
+        lines.append(f"  OPENAI_MODEL: {settings.openai_model}")
+        lines.append(f"  OPENAI_BASE_URL: {settings.openai_base_url or '(default api.openai.com)'}")
+        if not has_key:
+            lines.append("  Next: set OPENAI_API_KEY in your .env (get one at platform.openai.com).")
+
     elif p == "anthropic":
         ok = _dep_importable("anthropic")
         lines.append(f"  Dependency 'anthropic' installed: {ok}"
@@ -272,7 +323,7 @@ def check() -> list[str]:
             lines.append("  Next: set ANTHROPIC_API_KEY in your .env.")
 
     else:
-        lines.append(f"  UNKNOWN provider '{p}'. Valid: local | llamacpp | mlx | anthropic.")
+        lines.append(f"  UNKNOWN provider '{p}'. Valid: local | openai | anthropic | llamacpp | mlx.")
 
     return lines
 

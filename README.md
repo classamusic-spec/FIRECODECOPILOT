@@ -91,8 +91,8 @@ query ─► retrieve ─► agent (local model OR Claude) ─► streamed, cita
 ```
 
 - **Backend:** Python + FastAPI · ChromaDB · PyMuPDF · sentence-transformers · rank-bm25
-- **Models:** any of **Claude API**, **Ollama / LM Studio**, a local **GGUF** (llama.cpp), or **MLX**
-  (Apple Silicon) — switched with one env var.
+- **Models:** any of **Claude API**, **OpenAI API**, **Ollama / LM Studio**, a local **GGUF**
+  (llama.cpp), or **MLX** (Apple Silicon) — switched with one env var.
 - **Frontend:** React + Vite + Tailwind (a premium navy/coral "navy cockpit" theme).
 - **Tests:** an offline suite (chunking, retrieval, citations, streaming, API) + a golden **eval**
   harness with an optional **LLM-judge** tier.

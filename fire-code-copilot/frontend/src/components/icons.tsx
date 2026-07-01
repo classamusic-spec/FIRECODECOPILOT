@@ -93,6 +93,15 @@ export const CopyIcon = (p: IconProps) => (
   </svg>
 );
 
+export const ExportIcon = (p: IconProps) => (
+  // A downward arrow dropping into a tray — "export / save answer to PDF".
+  <svg {...base(p)}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
 export const SparkIcon = (p: IconProps) => (
   // A four-point "deep mode" spark.
   <svg {...base(p)}>
