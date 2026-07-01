@@ -1,0 +1,4 @@
+# Build-time only: freezes the backend into a standalone executable for the desktop .app.
+# Not needed to run the server normally. Install into the SAME venv as requirements.txt, then:
+#   cd desktop && bash scripts/build-sidecar.sh
+pyinstaller>=6.6

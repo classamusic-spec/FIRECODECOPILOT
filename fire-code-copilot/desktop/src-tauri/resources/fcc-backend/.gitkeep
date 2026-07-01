@@ -1,0 +1,3 @@
+# Placeholder so the Tauri `resources` path always exists (dev builds work without freezing).
+# `bash scripts/build-sidecar.sh` fills this folder with the standalone backend; that payload
+# is gitignored. With only this file present, the app falls back to the dev venv backend.
