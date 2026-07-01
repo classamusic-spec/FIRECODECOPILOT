@@ -1,0 +1,29 @@
+[package]
+name = "fire-code-copilot-desktop"
+version = "1.0.0"
+description = "Local-first fire-code research assistant (desktop wrapper)."
+authors = ["Fire Code CoPilot"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# The library the binary links against. Tauri v2 splits app logic into a lib so
+# mobile targets can reuse it; we keep the same shape for a clean build.
+[lib]
+name = "fire_code_copilot_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Smaller, faster release bundles for a local desktop tool.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
