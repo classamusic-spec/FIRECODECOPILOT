@@ -17,7 +17,8 @@ import {
   type Source,
   type Rating,
 } from "../lib/api";
-import { ThumbUpIcon, ThumbDownIcon, CheckIcon, CopyIcon } from "./icons";
+import { ThumbUpIcon, ThumbDownIcon, CheckIcon, CopyIcon, ExportIcon } from "./icons";
+import { exportAnswer } from "../lib/exportAnswer";
 
 interface Props {
   question: string;
@@ -204,19 +205,38 @@ export default function FeedbackBar({
           </span>
         )}
 
-        {/* Copy the raw answer markdown — unobtrusive, right-aligned. Hidden where
-            the Clipboard API isn't available (e.g. insecure contexts). */}
-        {canCopy && (
-          <button
-            type="button"
-            onClick={copyAnswer}
-            aria-label="Copy answer"
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-steel-400 transition active:scale-95 hover:text-steel-200"
-          >
-            {copied ? <CheckIcon className="h-3.5 w-3.5 text-verified-700" /> : <CopyIcon className="h-3.5 w-3.5" />}
-            {copied ? "Copied" : "Copy"}
-          </button>
-        )}
+        {/* Right-aligned actions: Export this answer to PDF, then Copy the raw
+            markdown. Both are unobtrusive and share the same subtle styling. */}
+        <div className="ml-auto flex items-center gap-2">
+          {/* Export ONLY this answer + its cited sources to a printable PDF (for the
+              inspection file). Pure client-side — works in demo mode too. Shown only
+              when there's an answer to export. */}
+          {answer && (
+            <button
+              type="button"
+              onClick={() => exportAnswer({ question, answer, sources })}
+              aria-label="Export answer to PDF"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-steel-400 transition active:scale-95 hover:text-steel-200"
+            >
+              <ExportIcon className="h-3.5 w-3.5" />
+              Export
+            </button>
+          )}
+
+          {/* Copy the raw answer markdown. Hidden where the Clipboard API isn't
+              available (e.g. insecure contexts). */}
+          {canCopy && (
+            <button
+              type="button"
+              onClick={copyAnswer}
+              aria-label="Copy answer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-steel-400 transition active:scale-95 hover:text-steel-200"
+            >
+              {copied ? <CheckIcon className="h-3.5 w-3.5 text-verified-700" /> : <CopyIcon className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Collapsible correction editor + "save as verified" path. */}
