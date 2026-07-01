@@ -1,0 +1,10 @@
+# Optional OCR support for SCANNED / image-only code books (opt-in via USE_OCR=true).
+# These Python packages also need the Tesseract binary installed on your system:
+#   macOS:         brew install tesseract
+#   Debian/Ubuntu: sudo apt-get install tesseract-ocr
+# Then:  pip install -r requirements-ocr.txt   and set USE_OCR=true (+ OCR_LANGUAGE, default "eng").
+#
+# Alternative (no code changes): OCR the PDF once with `ocrmypdf in.pdf out.pdf` and ingest the copy.
+
+pytesseract            # thin wrapper around the Tesseract OCR engine
+pillow                 # render PDF pages to images for OCR

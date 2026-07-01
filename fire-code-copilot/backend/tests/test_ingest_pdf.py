@@ -38,6 +38,33 @@ def test_image_only_pdf_flagged_for_ocr(tmp_path):
     assert info["image_only_pages"] >= 1
 
 
+def _scanned_text_pdf(path):
+    """A page that is a rasterized IMAGE of text (no text layer) — i.e. a scanned page."""
+    src = fitz.open(); p = src.new_page()
+    p.insert_text((72, 120), "SECTION 903 AUTOMATIC SPRINKLER SYSTEMS", fontsize=28)
+    pix = p.get_pixmap(dpi=200)
+    out = fitz.open(); op = out.new_page(width=p.rect.width, height=p.rect.height)
+    op.insert_image(op.rect, pixmap=pix)
+    out.save(str(path)); out.close(); src.close()
+
+
+def test_ocr_rescues_scanned_page(tmp_path, monkeypatch):
+    import shutil
+    import pytest
+    pytest.importorskip("pytesseract")
+    if not shutil.which("tesseract"):
+        pytest.skip("tesseract binary not installed")
+    from app.settings import settings
+    monkeypatch.setattr(settings, "use_ocr", True)
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path / "data"))   # isolate the OCR cache
+
+    p = tmp_path / "scan.pdf"
+    _scanned_text_pdf(p)
+    pages, info = ingest._read_pdf(p)
+    assert info["ocr_pages"] >= 1 and info["needs_ocr"] is False
+    assert "SPRINKLER" in pages[0][1].upper()
+
+
 def _ruled_table_pdf(path):
     doc = fitz.open()
     page = doc.new_page()
