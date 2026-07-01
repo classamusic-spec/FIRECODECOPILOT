@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     embedding_query_prefix: str = ""                 # prepended to queries only (input_type="query")
     embedding_passage_prefix: str = ""               # prepended to documents only (input_type="document")
 
+    # --- Parent-document retrieval ---
+    # Match a precise child window, but hand the model back the whole section it came from (better
+    # context without losing citation granularity). Only affects sections long enough to be split.
+    parent_retrieval: bool = True
+
     # --- Reranker (two-stage retrieval) ---
     use_reranker: bool = True
     reranker_model: str = "BAAI/bge-reranker-v2-m3"  # or "Qwen/Qwen3-Reranker-4B"

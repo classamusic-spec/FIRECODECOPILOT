@@ -63,7 +63,58 @@ def retrieve_scored(query: str, *, collection: str | None = None,
     # Pull in the marshal's Verified Answer Library (confirmed answers) so they surface, labeled.
     verified = _verified_matches(query, primary_qvec)
 
-    return rerank(query, verified + candidates)
+    scored = rerank(query, verified + candidates)
+    if settings.parent_retrieval:
+        scored = _expand_to_parents(scored, coll)
+    return scored
+
+
+def _expand_to_parents(scored, coll):
+    """Parent-document retrieval: when a matched chunk is one window of a section that was split
+    at ingest, stitch its sibling windows back into the full section and hand the model that.
+
+    The reranker still scored the precise child window (good precision); the model just sees the
+    whole section around it (good context). Sections that weren't split, verified answers, and
+    amendments pass through unchanged. Each parent section appears once, keeping its best score.
+    """
+    from .reranker import Scored
+    from .chunking import OVERLAP_WORDS
+
+    out, seen_parents = [], set()
+    for s in scored:
+        meta = s.chunk.get("metadata", {})
+        pid = meta.get("parent_id")
+        if not pid or meta.get("n_parts", 1) <= 1:
+            out.append(s)                       # whole-section chunk, verified, or amendment
+            continue
+        if pid in seen_parents:
+            continue                            # another window of a section we already expanded
+        seen_parents.add(pid)
+        full = _stitch_parent(coll, pid, OVERLAP_WORDS)
+        if full is None:
+            out.append(s)                       # couldn't fetch siblings — keep the window
+            continue
+        # Keep the matched window's metadata (section/page/score); drop the now-irrelevant part refs.
+        pruned = {k: v for k, v in meta.items() if k not in ("parent_id", "part", "n_parts")}
+        out.append(Scored({"text": full, "metadata": pruned}, s.score))
+    return out
+
+
+def _stitch_parent(coll, parent_id: str, overlap_words: int) -> str | None:
+    """Fetch all windows of a split section and rejoin them in order, removing the fixed overlap."""
+    try:
+        got = coll.get(where={"parent_id": parent_id}, include=["documents", "metadatas"])
+    except Exception:
+        return None
+    docs = got.get("documents") or []
+    metas = got.get("metadatas") or []
+    if not docs:
+        return None
+    parts = sorted(zip(metas, docs), key=lambda md: (md[0] or {}).get("part", 0))
+    words = parts[0][1].split()
+    for _m, doc in parts[1:]:
+        words += doc.split()[overlap_words:]    # drop the words duplicated from the previous window
+    return " ".join(words)
 
 
 def _fuse(rankings: list[list[dict]], limit: int, k: int = 60):
