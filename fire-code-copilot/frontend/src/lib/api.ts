@@ -102,6 +102,9 @@ export interface ClarifyRequest {
   building_context?: string;
   deep?: boolean;
   provider?: Provider;
+  /** Same semantics as AskRequest.collection — the clarify follow-up must search the SAME
+   *  edition the original question did, or the final answer silently switches code cycles. */
+  collection?: string;
 }
 
 /** Request body for POST /feedback. */
@@ -306,11 +309,16 @@ export async function askStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  // Whether a terminal event (clarify | meta | error) arrived. If the connection closes
+  // without one (backend restarted, proxy cut the stream), the caller's turn would be stuck
+  // in "streaming" forever — we surface that as an error instead.
+  let terminal = false;
 
   // Route one parsed SSE payload to the matching handler.
   const dispatch = (payload: unknown) => {
     if (!payload || typeof payload !== "object") return;
     const ev = payload as { type?: string; [k: string]: unknown };
+    if (ev.type === "clarify" || ev.type === "meta" || ev.type === "error") terminal = true;
     switch (ev.type) {
       case "token":
         h.onToken(String(ev.text ?? ""));
@@ -369,6 +377,9 @@ export async function askStream(
     }
     // Flush any trailing event that wasn't terminated by a blank line.
     if (buffer.trim()) handleChunk(buffer);
+    if (!terminal) {
+      h.onError("The connection closed before the answer finished. The backend may have restarted — try again.");
+    }
   } catch (e) {
     // An abort cancels the reader and throws — finalize quietly via onAbort.
     if (e instanceof DOMException && e.name === "AbortError") {

@@ -100,23 +100,33 @@ export function saveThreads(threads: Thread[]): void {
 /**
  * Upsert a thread's turns: if `turns` is empty (a fresh, unused thread) it is NOT
  * persisted. Returns the updated thread list (newest-first).
+ *
+ * Two guards:
+ *  - Same-reference turns are a VIEW, not an edit: selecting a thread to read it must not
+ *    bump `updatedAt` (which would shuffle history/matter ordering to "just now").
+ *  - The write merges against the freshly LOADED store, not just the in-memory list, so two
+ *    open tabs don't silently erase each other's saved conversations.
  */
 export function upsertThread(threads: Thread[], id: string, turns: Turn[]): Thread[] {
   if (turns.length === 0) return threads;
+  const inMemory = threads.find((t) => t.id === id);
+  if (inMemory && inMemory.turns === turns) return threads;   // viewing, nothing changed
+
   const now = Date.now();
-  const existing = threads.find((t) => t.id === id);
-  const merged: Thread = existing
-    ? { ...existing, turns, title: titleFor(turns), updatedAt: now }
+  const stored = loadThreads();
+  const base = stored.find((t) => t.id === id) ?? inMemory;
+  const merged: Thread = base
+    ? { ...base, turns, title: titleFor(turns), updatedAt: now }
     : { id, title: titleFor(turns), createdAt: now, updatedAt: now, turns };
-  const rest = threads.filter((t) => t.id !== id);
-  const next = [merged, ...rest];
+  // Union: our merged thread + everything else currently stored (keeps other tabs' work).
+  const next = [merged, ...stored.filter((t) => t.id !== id)];
   saveThreads(next);
   return next;
 }
 
-/** Remove a thread by id, persist, and return the new list. */
-export function removeThread(threads: Thread[], id: string): Thread[] {
-  const next = threads.filter((t) => t.id !== id);
+/** Remove a thread by id, persist, and return the new list (merged with the live store). */
+export function removeThread(_threads: Thread[], id: string): Thread[] {
+  const next = loadThreads().filter((t) => t.id !== id);
   saveThreads(next);
   return next;
 }
@@ -124,10 +134,14 @@ export function removeThread(threads: Thread[], id: string): Thread[] {
 /**
  * File a thread under a matter (or clear it with an empty string). Persists and returns the new
  * list. Does not change `updatedAt`, so re-filing an old conversation doesn't jump it to the top.
+ * Merges against the live store (cross-tab safe); falls back to the in-memory list for a thread
+ * that hasn't been persisted yet.
  */
 export function setThreadMatter(threads: Thread[], id: string, matter: string): Thread[] {
   const clean = matter.trim();
-  const next = threads.map((t) =>
+  const stored = loadThreads();
+  const pool = stored.some((t) => t.id === id) ? stored : threads;
+  const next = pool.map((t) =>
     t.id === id ? { ...t, matter: clean || undefined } : t,
   );
   saveThreads(next);
