@@ -10,14 +10,33 @@
  *   - verified                    -> "VERIFIED" badge
  *   - is_table                    -> small "TABLE" tag
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Source } from "../lib/api";
 import { ChevronIcon } from "./icons";
+import { sectionsRelate } from "../lib/sections";
+import { findCitedSpan } from "../lib/citations";
+import type { CiteTarget } from "./ChatMessage";
 
 interface Props {
   source: Source;
   /** 1-based index for a stable, human-readable reference label. */
   index: number;
+  /** When a citation in the answer is clicked, the matching source scrolls into view + flashes. */
+  highlight?: CiteTarget | null;
+}
+
+/** Render source text, wrapping the line that carries `section` in a highlight (if present). */
+function renderSourceText(text: string, section?: string) {
+  if (!section) return text;
+  const span = findCitedSpan(text, section);
+  if (!span) return text;
+  return (
+    <>
+      {text.slice(0, span.start)}
+      <mark className="rounded-[2px] bg-coral-500/25 text-coral-100">{text.slice(span.start, span.end)}</mark>
+      {text.slice(span.end)}
+    </>
+  );
 }
 
 /** Build the "BOOK ed · §section · p.page" reference line from metadata. */
@@ -31,17 +50,37 @@ function referenceLine(meta: Source["metadata"]): string {
   return parts.join("  ·  ") || "Source";
 }
 
-export default function SourceCitation({ source, index }: Props) {
+export default function SourceCitation({ source, index, highlight }: Props) {
   const [open, setOpen] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const meta = source.metadata ?? {};
 
   // An amendment is "controlling" CT-adopted text; either flag triggers the badge.
   const isAmendment = Boolean(meta.is_amendment || meta.controlling);
 
+  // Is THIS source the one the clicked citation refers to? (section-relation, so §903.2 in the
+  // answer matches a retrieved §903.2.8 chunk, mirroring the backend merge logic).
+  const isTarget = Boolean(highlight && sectionsRelate(meta.section, highlight.section));
+
+  // React to a citation click: open, scroll into view, and flash once. Keyed on the nonce so
+  // clicking the same citation again re-triggers it.
+  useEffect(() => {
+    if (!isTarget || !highlight) return;
+    setOpen(true);
+    cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(true);
+    const t = setTimeout(() => setFlash(false), 1600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight?.nonce]);
+
   return (
     <div
+      ref={cardRef}
       className={
-        "overflow-hidden rounded-xl border text-sm transition-colors " +
+        "overflow-hidden rounded-xl border text-sm transition-all duration-300 " +
+        (flash ? "ring-2 ring-coral-400 ring-offset-2 ring-offset-navy-950 " : "") +
         (isAmendment
           ? "border-coral-500/40 bg-coral-500/[0.07]"
           : meta.verified
@@ -76,11 +115,12 @@ export default function SourceCitation({ source, index }: Props) {
         </span>
       </button>
 
-      {/* Quoted source text — monospace, scrollable, verbatim from the code book. */}
+      {/* Quoted source text — monospace, scrollable, verbatim from the code book. When a citation
+          was clicked, the line carrying that section number is highlighted for quick verification. */}
       {open && (
         <div className="border-t border-white/10 bg-navy-950/50 px-3 py-2.5">
           <pre className="scroll-thin max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-steel-300">
-            {source.text}
+            {renderSourceText(source.text, isTarget ? highlight?.section : undefined)}
           </pre>
         </div>
       )}
