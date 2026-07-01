@@ -39,6 +39,32 @@ const uid = () => `${Date.now().toString(36)}-${(_seq++).toString(36)}`;
 /** Distance (px) from the bottom within which we treat the log as "at bottom". */
 const NEAR_BOTTOM_PX = 140;
 
+/**
+ * Repair turns restored from storage after an interrupted session: a turn saved while
+ * streaming/loading (tab closed mid-answer) would render a caret forever AND block the
+ * persistence effect for the whole thread; a persisted `clarifying: true` leaves the chips
+ * stuck on a disabled "Working…" button. Both become inert, explained states.
+ */
+function sanitizeRestoredTurns(turns: Turn[]): Turn[] {
+  let changed = false;
+  const out = turns.map((t) => {
+    if (t.role !== "assistant") return t;
+    if (t.status === "streaming" || t.status === "loading") {
+      changed = true;
+      return { ...t, status: "error" as const, streamText: "",
+               error: "This answer was interrupted (the app closed while it was streaming). Ask again." };
+    }
+    if (t.clarifying) {
+      changed = true;
+      return { ...t, clarifying: false };
+    }
+    return t;
+  });
+  // Same reference when clean, so loading a thread for viewing isn't mistaken for an edit
+  // (the persistence effect skips reference-identical turns and won't bump updatedAt).
+  return changed ? out : turns;
+}
+
 /** In showcase mode, pre-seed the log so the UI renders fully populated. */
 function demoSeed(): Turn[] {
   if (!DEMO || DEMO_VARIANT === "empty") return [];
@@ -122,7 +148,7 @@ export default function App() {
       const savedId = loadActiveId();
       const active = loaded.find((t) => t.id === savedId) ?? loaded[0]; // newest-first
       setActiveId(active.id);
-      setTurns(active.turns);
+      setTurns(sanitizeRestoredTurns(active.turns));
     }
     // else: keep the fresh empty thread created in state initializers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -264,13 +290,22 @@ export default function App() {
                 return { ...turn, status: "done", response };
               }),
             ),
-          onError: (msg) => patchTurn(assistantId, { status: "error", error: msg }),
+          // Guarded on status: if the meta already finalized this turn (done, with the full
+          // answer + sources), a late transport error or Stop click must not clobber it.
+          onError: (msg) =>
+            setTurns((prev) =>
+              prev.map((turn) =>
+                turn.id === assistantId && turn.role === "assistant" && turn.status === "streaming"
+                  ? { ...turn, status: "error", error: msg }
+                  : turn,
+              ),
+            ),
           // Stopped by the user: finalize the turn using whatever streamed so far
           // as the answer (with a faint "(stopped)" note iff there was any text).
           onAbort: () =>
             setTurns((prev) =>
               prev.map((turn) => {
-                if (turn.id !== assistantId || turn.role !== "assistant") return turn;
+                if (turn.id !== assistantId || turn.role !== "assistant" || turn.status !== "streaming") return turn;
                 const partial = turn.streamText ?? "";
                 const response: AskResponse = {
                   mode: "answer",
@@ -308,9 +343,13 @@ export default function App() {
     abortRef.current?.abort();
   }
 
+  // A /clarify round-trip is in flight for some turn. Like `sending`, switching threads while
+  // it's pending would resolve the answer against the wrong conversation and drop it.
+  const clarifyBusy = turns.some((t) => t.role === "assistant" && t.clarifying);
+
   /** New chat: persist the current turns (if any), then open a fresh empty thread. */
   function handleNewChat() {
-    if (sending) return; // don't switch away mid-stream
+    if (sending || clarifyBusy) return; // don't switch away mid-stream / mid-clarify
     // The persistence effect already saved the current thread once it settled.
     const id = newThreadId();
     setActiveId(id);
@@ -322,17 +361,23 @@ export default function App() {
 
   /** Load a saved conversation into the log. */
   function handleSelectThread(id: string) {
-    if (sending) return;
+    if (sending || clarifyBusy) return;
     const t = threads.find((x) => x.id === id);
     if (!t) return;
     setActiveId(id);
-    setTurns(t.turns);
+    setTurns(sanitizeRestoredTurns(t.turns));
     saveActiveId(id);
     setAtBottom(true);
   }
 
   /** Delete a saved conversation; if it was active, drop to a fresh empty thread. */
   function handleDeleteThread(id: string) {
+    if (id === activeId && (sending || clarifyBusy)) {
+      // Deleting the conversation under an active stream would leave the stream running
+      // invisibly with the composer locked. Stop it first; the user can delete after.
+      abortRef.current?.abort();
+      return;
+    }
     setThreads((prev) => removeThread(prev, id));
     if (id === activeId) {
       const fresh = newThreadId();
@@ -358,6 +403,8 @@ export default function App() {
         building_context: turn.buildingContext || undefined,
         deep,
         provider,
+        // The follow-up must search the SAME edition the original question did.
+        collection: selectedCollection ?? undefined,
       });
       patchTurn(turnId, { response: res, clarifying: false, status: "done" });
     } catch (e) {

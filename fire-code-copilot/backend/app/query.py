@@ -33,8 +33,12 @@ _TERMS = {
     "fire area": "fire area separation", "occupant load": "occupant load factor",
 }
 
-# "R-2", "R2", "Group R-2", "A-3" ... captured so we can map the occupancy code.
-_OCC_RE = re.compile(r"\b(?:group\s+)?([ABEFHIMRSU])-?([1-4])?\b", re.IGNORECASE)
+# "R-2", "R2", "Group R-2", "Group A" ... captured so we can map the occupancy code. A bare
+# single letter only counts WITH the "Group" prefix; unanchored it matched the English words
+# "a" and "I" ("do i need a permit?"), appending "Group A assembly / Group I institutional" to
+# almost every natural-language query and skewing recall toward the wrong occupancy chapters.
+_OCC_RE = re.compile(r"\b(?:group\s+([ABEFHIMRSU])(?:-?([1-4]))?|([ABEFHIMRSU])-?([1-4]))\b",
+                     re.IGNORECASE)
 
 
 def expand_query(q: str) -> str:
@@ -51,8 +55,9 @@ def expand_query(q: str) -> str:
             seen.add(full)
 
     for m in _OCC_RE.finditer(q):
-        letter = m.group(1).upper()
-        key = f"{letter}-{m.group(2)}" if m.group(2) else letter
+        letter = (m.group(1) or m.group(3)).upper()      # "Group X" branch or "X-2" branch
+        digit = m.group(2) or m.group(4)
+        key = f"{letter}-{digit}" if digit else letter
         full = _OCCUPANCY.get(key) or _OCCUPANCY.get(letter)
         if full and full not in seen:
             additions.append(full)

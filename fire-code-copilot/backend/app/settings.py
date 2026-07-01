@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     chroma_dir: str = "./data/chroma"
     active_collection: str = "csfsc_2022"            # set per active edition
     verified_collection: str = "verified_answers"    # marshal-confirmed answers (learning loop)
+    # Max embedding distance for a verified answer to surface as relevant (normalized vectors,
+    # L2: 1.0 ≈ cosine 0.5). Chroma always returns the k nearest regardless of how far — without
+    # this cutoff an unrelated confirmed answer fronts every query as [VERIFIED].
+    verified_max_distance: float = 1.0
     feedback_db: str = "./data/feedback.sqlite"      # 👍/👎 + corrections
 
     # --- Deep-mode escalation ---

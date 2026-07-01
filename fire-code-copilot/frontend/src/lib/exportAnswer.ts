@@ -253,16 +253,22 @@ ${sourcesHtml(sources)}
   win.document.close();
 
   // Let the new document lay out before invoking print (some browsers need a tick).
+  // Print exactly ONCE: Chrome fires onload for document.write'd content AND the timeout
+  // fallback would run, popping a second print dialog after the user dismissed the first.
   win.focus();
-  win.onload = () => win.print();
-  // Fallback for browsers that don't fire onload for document.write'd content.
-  setTimeout(() => {
+  let printed = false;
+  const printOnce = () => {
+    if (printed) return;
+    printed = true;
     try {
       win.print();
     } catch {
       /* window may already be closed by the user — ignore */
     }
-  }, 400);
+  };
+  win.onload = printOnce;
+  // Fallback for browsers that don't fire onload for document.write'd content.
+  setTimeout(printOnce, 400);
 
   return true;
 }

@@ -282,7 +282,9 @@ def ingest(force: bool = False) -> dict:
         if not chunks:
             continue
 
-        ids = [f"{meta['book']}|{c['metadata']['page']}|{i}" for i, c in enumerate(chunks)]
+        # Ids are keyed by the FILE (not the book label): two volumes sharing a `book` value must
+        # not overwrite each other's chunks.
+        ids = [f"{pdf.name}|{c['metadata']['page']}|{i}" for i, c in enumerate(chunks)]
         texts = [c["text"] for c in chunks]
         metas = [c["metadata"] for c in chunks]
         for m in metas:
@@ -292,11 +294,20 @@ def ingest(force: bool = False) -> dict:
         # Re-ingest hygiene: drop this file's PRIOR vectors before re-indexing it. Chunk ids are
         # positional (…|page|i), so a corrected/updated book re-chunks to shifted ids and the old
         # vectors would otherwise linger — leaving outdated code text retrievable and citable. We
-        # key the purge on the source filename so exactly this file's chunks are replaced.
+        # key the purge on the source filename so exactly this file's chunks are replaced. If the
+        # manifest moved this file to a DIFFERENT collection, purge its copy from the old one too,
+        # so a stale duplicate can't keep answering queries in the previous cycle.
         try:
             coll.delete(where={"source": pdf.name})
         except Exception:
             pass
+        for old_cname, files in list(collections_idx.items()):
+            if old_cname != cname and pdf.name in files:
+                try:
+                    _coll(old_cname).delete(where={"source": pdf.name})
+                except Exception:
+                    pass
+                files.pop(pdf.name, None)
         B = 64                                        # batch embed+upsert to keep memory flat
         for s in range(0, len(texts), B):
             vecs = embeddings.embed(texts[s:s + B], input_type="document")
@@ -314,8 +325,29 @@ def ingest(force: bool = False) -> dict:
         summary["chunks_added"] += len(chunks)
         print(f"  indexed {pdf.name}: {len(chunks)} chunks -> collection '{cname}'")
 
+    # Files DELETED from the books folder: purge their chunks from every collection that holds
+    # them. Without this, removing a book leaves its text permanently retrievable and citable.
+    current = {p.name for p in pdfs}
+    for gone in [name for name in state if name not in current]:
+        for old_cname, files in list(collections_idx.items()):
+            if gone in files:
+                try:
+                    _coll(old_cname).delete(where={"source": gone})
+                except Exception:
+                    pass
+                files.pop(gone, None)
+        state.pop(gone, None)
+        summary.setdefault("removed", []).append(gone)
+        print(f"  removed {gone}: purged its chunks (file no longer in the books folder)")
+
     _save_json(STATE_FILE, state)
     _save_json(COLLECTIONS_FILE, collections_idx)
+
+    # The BM25 index is cached per (store, collection, count); a same-size re-ingest would keep
+    # serving the replaced text. Anything indexed/purged above invalidates the lexical channel.
+    from . import lexical
+    lexical.reset_cache()
+
     summary["collections"] = {k: dict(v) for k, v in per_collection.items()}
     summary["active_collection"] = settings.active_collection
     return summary

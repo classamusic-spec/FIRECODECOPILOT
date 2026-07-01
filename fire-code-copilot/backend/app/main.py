@@ -5,7 +5,7 @@ Then POST /ask, or use the CLI (python -m app.cli) which calls the same agent di
 """
 from __future__ import annotations
 import json
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -36,12 +36,31 @@ def warm():
     return run_warm()
 
 
+def _http_errors(fn):
+    """Map known failure classes to proper HTTP errors instead of bare 500s + leaked tracebacks:
+    an unknown collection is the caller's mistake (404); an unreachable/failing model is an
+    upstream problem (502 with a plain-language hint)."""
+    def wrapped():
+        try:
+            return fn()
+        except Exception as e:
+            name = type(e).__name__
+            if "NotFound" in name and "collection" in str(e).lower():
+                raise HTTPException(status_code=404, detail=str(e))
+            if "Connection" in name or "APIConnection" in name:
+                raise HTTPException(status_code=502,
+                                    detail=f"The model backend is unreachable: {e}. "
+                                           f"Check that your model server is running (see /health).")
+            raise
+    return wrapped()
+
+
 @app.post("/ask")
 def ask(req: AskRequest):
-    res = agent_ask(req.question, mode=req.mode, building_context=req.building_context,
-                    active_cycle_block=active_cycle_block(), deep=req.deep, provider=req.provider,
-                    collection=req.collection)
-    return result_dict(res)
+    return _http_errors(lambda: result_dict(agent_ask(
+        req.question, mode=req.mode, building_context=req.building_context,
+        active_cycle_block=active_cycle_block(), deep=req.deep, provider=req.provider,
+        collection=req.collection)))
 
 
 @app.post("/ask/stream")
@@ -50,6 +69,16 @@ def ask_stream(req: AskRequest):
     `data: {json}\\n\\n` with a typed event (token | clarify | meta | error | done)."""
     def sse():
         try:
+            if req.mode == "retrieve":
+                # Retrieve-only needs no LLM: emit the sources as a meta event and finish.
+                res = agent_ask(req.question, mode="retrieve",
+                                building_context=req.building_context,
+                                active_cycle_block=active_cycle_block(),
+                                collection=req.collection)
+                d = result_dict(res)
+                yield f"data: {json.dumps({'type': 'meta', 'sources': d['sources'], 'citations_ok': True, 'unverified': [], 'answer_suffix': '', 'escalated': False, 'confidence': d.get('confidence'), 'confidence_band': d.get('confidence_band')})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
             for event in agent_ask_stream(
                 req.question, building_context=req.building_context,
                 active_cycle_block=active_cycle_block(), deep=req.deep,
@@ -57,6 +86,7 @@ def ask_stream(req: AskRequest):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:  # never leave the stream hanging on an unexpected error
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(sse(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -67,9 +97,9 @@ def clarify(req: ClarifyRequest):
     """Continue after the marshal answers the clarifying questions: fold the answers into the
     building context and re-ask."""
     ctx = "\n".join(c for c in (req.building_context, req.answers) if c.strip())
-    res = agent_ask(req.question, building_context=ctx, active_cycle_block=active_cycle_block(),
-                    deep=req.deep, provider=req.provider, collection=req.collection)
-    return result_dict(res)
+    return _http_errors(lambda: result_dict(agent_ask(
+        req.question, building_context=ctx, active_cycle_block=active_cycle_block(),
+        deep=req.deep, provider=req.provider, collection=req.collection)))
 
 
 @app.post("/ingest")
