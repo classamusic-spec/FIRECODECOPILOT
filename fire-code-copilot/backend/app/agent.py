@@ -189,7 +189,25 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
             elif mode == "answer":
                 yield {"type": "token", "text": delta}
     except Exception as e:                                              # transport/model failure
-        yield {"type": "error", "message": str(e)}
+        # Tokens already streamed are on the marshal's screen — the safety net must still run on
+        # them. Validate the partial text and finalize with a meta carrying the verdict plus a
+        # truncation warning, so a fabricated citation in a half-delivered answer doesn't slip
+        # past unflagged. Only when NOTHING useful was delivered do we emit a bare error.
+        partial = "".join(buffer)
+        if mode == "answer" and partial.strip():
+            ok, unverified, suffix = True, [], ""
+            if settings.validate_citations:
+                check = citations.validate(partial, chunks)
+                suffix = citations.annotate(partial, check)[len(partial):]
+                ok, unverified = check.ok, check.unverified
+            suffix = (suffix + "\n\n" if suffix else "\n\n") + \
+                "⚠️ The answer was cut off by a connection failure — treat it as incomplete."
+            yield {"type": "meta", "sources": chunks, "citations_ok": ok,
+                   "unverified": unverified, "answer_suffix": suffix, "escalated": use_deep,
+                   "confidence": conf, "confidence_band": band}
+        else:
+            yield {"type": "error", "message": str(e)}
+        yield {"type": "done"}
         return
 
     full = "".join(buffer)

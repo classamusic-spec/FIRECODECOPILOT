@@ -29,9 +29,12 @@ SECTION_HEADING = re.compile(r"^\s*(\d{3,4}(?:\.\d+)*)\s+[A-Z(]")
 # Structural headings. CASE-SENSITIVE on purpose: real headings are "SECTION 903" / "TABLE 509",
 # while body text says "see Section 903.2" — matching case keeps cross-refs from faking headings.
 SECTION_KEYWORD = re.compile(r"^\s*(SECTION|CHAPTER|TABLE|APPENDIX|ANNEX)\s+([0-9A-Z][0-9A-Z.\-]*)")
-# Inline markers CT (and other amenders) use to flag changed text.
-AMENDMENT_MARKER = re.compile(r"\((?:amd|add|del|sub)\)|\bamend(?:ed|ment)?\b|"
-                              r"\b(add|delete|substitute) the following\b", re.IGNORECASE)
+# Inline markers CT (and other amenders) use to flag changed text. ONLY the explicit
+# parenthetical markers count: base model-code text routinely says "as amended" / "the amendment
+# to..." in prose, and tagging on those words made base chunks masquerade as the controlling CT
+# text — the exact wrong-determination failure the amendment layer exists to prevent. Amendment
+# DOCUMENTS are tagged wholesale via is_amendment_doc, so prose phrasing there needs no regex.
+AMENDMENT_MARKER = re.compile(r"\((?:amd|add|del|sub)\)", re.IGNORECASE)
 
 TARGET_WORDS = 450        # ~600 tokens
 OVERLAP_WORDS = 60

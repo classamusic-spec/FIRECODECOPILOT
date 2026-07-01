@@ -31,6 +31,18 @@ SECTION_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Standard references ("NFPA 13") in SOURCE text — used to verify a cited standard the same way
+# dotted section numbers are verified. Without this, a correctly grounded "NFPA 13" citation
+# could never verify (present-sections held only dotted numerics), so routine sprinkler/alarm
+# answers carried a false "UNVERIFIED CITATION" warning — alarm fatigue that trains the marshal
+# to ignore the one warning guarding against real fabrications.
+STANDARD_RE = re.compile(r"\bNFPA\s*(\d+)\b", re.IGNORECASE)
+
+
+def _standard_tokens(text: str) -> set[str]:
+    """Canonical 'NFPA <n>' tokens in `text` (spacing-insensitive: 'NFPA13' == 'NFPA 13')."""
+    return {f"NFPA {m.group(1)}" for m in STANDARD_RE.finditer(text or "")}
+
 # Text the model placed in straight or curly double quotes.
 QUOTE_RE = re.compile(r"[\"“]([^\"“”]{1,500})[\"”]")
 # A quote shorter than this (in words) is a term/label, not a claim worth grounding.
@@ -89,16 +101,21 @@ def validate(answer: str, source_chunks: list[dict]) -> CitationCheck:
     section token that literally appears in some chunk's text (whole-token, not substring). A
     quote is verified if it appears (punctuation-insensitively) in the retrieved source text.
     """
-    # Present sections: from metadata, plus every section number literally in the shown text.
+    # Present sections: from metadata, plus every section number literally in the shown text,
+    # plus standard references ("NFPA 13") so citing a standard the sources name can verify.
     present: set[str] = {_normalize(str(c.get("metadata", {}).get("section", ""))) for c in source_chunks}
     present.discard("")
     for c in source_chunks:
-        present |= section_tokens(c.get("text", ""))
+        text = c.get("text", "")
+        present |= section_tokens(text)
+        present |= _standard_tokens(text)
     source_loose = _loose(" ".join(c.get("text", "") for c in source_chunks))
 
     check = CitationCheck(cited=extract_citations(answer))
     for c in check.cited:
-        (check.verified if _normalize(c) in present else check.unverified).append(c)
+        cited_std = _standard_tokens(c)          # {'NFPA 13'} when c is a standard ref, else empty
+        ok = _normalize(c) in present or (bool(cited_std) and cited_std <= present)
+        (check.verified if ok else check.unverified).append(c)
 
     for q in extract_quotes(answer):
         check.quotes.append(q)

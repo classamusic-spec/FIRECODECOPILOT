@@ -58,12 +58,26 @@ def retrieve_scored(query: str, *, collection: str | None = None,
             rankings.append(lexical.search(coll, expanded, settings.bm25_candidates))
 
     candidates = _fuse(rankings, settings.retrieve_before_rerank)
-    candidates = _merge_amendments(candidates, coll)
 
     # Pull in the marshal's Verified Answer Library (confirmed answers) so they surface, labeled.
-    verified = _verified_matches(query, primary_qvec)
+    # Filtered to THIS edition and distance-thresholded — a confirmed answer for a different
+    # question (or a different code cycle) must not masquerade as relevant.
+    verified = _verified_matches(query, primary_qvec, coll_name)
 
-    scored = rerank(query, verified + candidates)
+    if settings.use_reranker:
+        # The cross-encoder scores everything (verified + amendments + candidates) by true
+        # relevance, so ordering is safe to delegate to it.
+        candidates = _merge_amendments(candidates, coll)
+        scored = rerank(query, verified + candidates)
+    else:
+        # No reranker → fusion order IS the ranking, and rerank() would just head-truncate.
+        # Keep the top fused candidates FIRST (the actual target must never be displaced), then
+        # add their related amendments and any verified extras WITHOUT truncating them away.
+        from .reranker import Scored
+        kept = candidates[:settings.keep_after_rerank]
+        merged = _merge_amendments(kept, coll)
+        scored = [Scored(c, 0.0) for c in merged] + [Scored(v, 0.0) for v in verified]
+
     if settings.parent_retrieval:
         scored = _expand_to_parents(scored, coll)
     return scored
@@ -130,18 +144,33 @@ def _fuse(rankings: list[list[dict]], limit: int, k: int = 60):
     return [_format(info[i][1], info[i][0]) for i in ordered]
 
 
-def _verified_matches(query: str, qvec: list[float], k: int = 3) -> list[dict]:
-    """Top verified answers similar to the query, labeled so the agent weights them as confirmed."""
+def _verified_matches(query: str, qvec: list[float], collection: str, k: int = 3) -> list[dict]:
+    """Verified answers SIMILAR to the query, for THIS edition, labeled as confirmed.
+
+    Two guards, both load-bearing:
+      - `where={"edition": collection}` — an answer verified under the 2022 cycle must not
+        surface as [VERIFIED] for a legacy-edition query (or vice versa after a transition).
+      - a distance cutoff — Chroma returns the k *nearest* entries no matter how far; without a
+        threshold the library's single answer about R-2 sprinklers would front every unrelated
+        question as "confirmed". Empty/corrupt entries are skipped for the same reason.
+    """
     try:
         vcoll = _client().get_collection(settings.verified_collection)
     except Exception:
         return []  # no verified answers yet
     try:
-        res = vcoll.query(query_embeddings=[qvec], n_results=k, include=["documents", "metadatas"])
+        res = vcoll.query(query_embeddings=[qvec], n_results=k,
+                          where={"edition": collection},
+                          include=["documents", "metadatas", "distances"])
     except Exception:
         return []
     out = []
-    for d, m in zip(res.get("documents", [[]])[0], res.get("metadatas", [[]])[0]):
+    dists = (res.get("distances") or [[]])[0]
+    for i, (d, m) in enumerate(zip(res.get("documents", [[]])[0], res.get("metadatas", [[]])[0])):
+        if not (d or "").strip():
+            continue
+        if i < len(dists) and dists[i] is not None and dists[i] > settings.verified_max_distance:
+            continue
         meta = {**(m or {}), "verified": True}
         out.append(_format(meta, d))
     return out
