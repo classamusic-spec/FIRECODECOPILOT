@@ -94,6 +94,18 @@ def review_queue():
     return {"items": fb.review_queue()}
 
 
+@app.get("/verified")
+def verified():
+    """List the Verified Answer Library entries (for review / cleanup)."""
+    return {"items": fb.list_verified()}
+
+
+@app.delete("/verified/{vid}")
+def delete_verified(vid: str):
+    """Remove a stale/wrong verified answer so it stops surfacing as [VERIFIED]."""
+    return fb.delete_verified(vid)
+
+
 @app.get("/cycle-status")
 def cycle_status():
     return {"active": active_cycle_block(), "reminder": cycle_reminder()}

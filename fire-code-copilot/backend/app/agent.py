@@ -58,6 +58,35 @@ class AgentResult:
     clarifying_questions: list[str] = field(default_factory=list)
     chips: dict = field(default_factory=dict)
     escalated: bool = False          # did we auto-escalate to the deep model?
+    confidence: float | None = None       # top rerank score (None when the reranker is off)
+    confidence_band: str | None = None    # "low" | "medium" | "high" | None
+
+
+def _confidence(scored) -> tuple[float | None, str | None]:
+    """Gauge retrieval confidence. Empty retrieval is unambiguously "low"; otherwise we band the
+    top rerank score (only meaningful when the reranker is on — else the band is unknown/None)."""
+    if not scored:
+        return None, "low"
+    if not settings.use_reranker:
+        return None, None
+    top = max(s.score for s in scored)
+    band = ("high" if top >= settings.confidence_high_above
+            else "low" if top < settings.deep_escalate_below else "medium")
+    return round(float(top), 3), band
+
+
+def _flag_low_confidence(question, answer, sources, building_context, band) -> None:
+    """Auto-populate the review queue when an answer is low-confidence (best-effort; never
+    breaks answering). This closes the gap-detection loop without the marshal doing anything."""
+    if band != "low" or not settings.auto_flag_low_confidence:
+        return
+    try:
+        from . import feedback
+        feedback.record_feedback(question=question, answer=answer or "", rating="",
+                                 building_context=building_context, sources=sources or [],
+                                 low_confidence=True)
+    except Exception:
+        pass
 
 
 def ask(question: str, *, mode: str = "answer", building_context: str = "",
@@ -76,6 +105,7 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
     top_score = max((s.score for s in scored), default=0.0)
     auto_deep = settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
     use_deep = deep or auto_deep
+    conf, band = _confidence(scored)
 
     system = _system_prompt(active_cycle_block)
     user = _build_user_block(question, building_context, render_sources(chunks)) + _OUTPUT_PROTOCOL
@@ -90,17 +120,18 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
         return AgentResult(mode="answer", answer=None, sources=chunks, citations_ok=True,
                            unverified=[], needs_clarification=True,
                            clarifying_questions=clar.get("questions", []),
-                           chips=clar.get("chips", {}) or {}, escalated=use_deep)
+                           chips=clar.get("chips", {}) or {}, escalated=use_deep,
+                           confidence=conf, confidence_band=band)
 
     # Safety net: verify every cited section actually appears in the retrieved sources.
-    if settings.validate_citations:
-        check = citations.validate(draft, chunks)
-        answer = citations.annotate(draft, check)
-        return AgentResult(mode="answer", answer=answer, sources=chunks,
-                           citations_ok=check.ok, unverified=check.unverified, escalated=use_deep)
-
-    return AgentResult(mode="answer", answer=draft, sources=chunks,
-                       citations_ok=True, unverified=[], escalated=use_deep)
+    check = citations.validate(draft, chunks) if settings.validate_citations else None
+    answer = citations.annotate(draft, check) if check else draft
+    ok = check.ok if check else True
+    unverified = check.unverified if check else []
+    _flag_low_confidence(question, answer, chunks, building_context, band)
+    return AgentResult(mode="answer", answer=answer, sources=chunks, citations_ok=ok,
+                       unverified=unverified, escalated=use_deep,
+                       confidence=conf, confidence_band=band)
 
 
 def ask_stream(question: str, *, building_context: str = "", active_cycle_block: str = "",
@@ -124,6 +155,7 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     top_score = max((s.score for s in scored), default=0.0)
     auto_deep = settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
     use_deep = deep or auto_deep
+    conf, band = _confidence(scored)
 
     system = _system_prompt(active_cycle_block)
     user = _build_user_block(question, building_context, render_sources(chunks)) + _OUTPUT_PROTOCOL
@@ -152,7 +184,8 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     clar = _parse_clarification(full)
     if clar is not None:
         yield {"type": "clarify", "clarifying_questions": clar.get("questions", []),
-               "chips": clar.get("chips", {}) or {}, "escalated": use_deep}
+               "chips": clar.get("chips", {}) or {}, "escalated": use_deep,
+               "confidence": conf, "confidence_band": band}
         yield {"type": "done"}
         return
 
@@ -165,8 +198,10 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
         suffix = citations.annotate(full, check)[len(full):]   # just the appended warning text
         ok, unverified = check.ok, check.unverified
 
+    _flag_low_confidence(question, full + suffix, chunks, building_context, band)
     yield {"type": "meta", "sources": chunks, "citations_ok": ok, "unverified": unverified,
-           "answer_suffix": suffix, "escalated": use_deep}
+           "answer_suffix": suffix, "escalated": use_deep,
+           "confidence": conf, "confidence_band": band}
     yield {"type": "done"}
 
 

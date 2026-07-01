@@ -11,7 +11,7 @@ collection comes from its books.yaml `collection:` (default: settings.active_col
 model code and its Connecticut amendments in the SAME collection so amendment-merge can pair them.
 """
 from __future__ import annotations
-import hashlib, json, os, sys
+import hashlib, json, os, re, sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -90,6 +90,44 @@ def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
     return pages, info
 
 
+_TABLE_CAP = re.compile(r"TABLE\s+([0-9]+(?:\.[0-9]+)*[A-Z]?)", re.IGNORECASE)
+
+
+def _table_chunks(pdf: Path, meta: dict) -> list[dict]:
+    """Extract RULED tables as their own markdown chunks (tagged is_table), so "what's the value
+    in row X" questions keep structure instead of degrading to one flattened blob. Best-effort and
+    defensive — any failure just yields no table chunks (the flattened text path still covers it).
+    The section is taken from a "TABLE 903.2.11.6" caption on the same page when present.
+    """
+    import fitz
+    out: list[dict] = []
+    try:
+        doc = fitz.open(pdf)
+    except Exception:
+        return out
+    for i, page in enumerate(doc):
+        try:
+            found = getattr(page.find_tables(), "tables", []) or []
+        except Exception:
+            continue
+        if not found:
+            continue
+        caps = _TABLE_CAP.findall(page.get_text("text"))
+        for ti, t in enumerate(found):
+            try:
+                md = t.to_markdown()
+            except Exception:
+                continue
+            if not md or not md.strip():
+                continue
+            section = caps[ti] if ti < len(caps) else (caps[0] if caps else "(table)")
+            out.append({"text": md, "metadata": {
+                "book": meta["book"], "edition": meta["edition"], "section": section,
+                "page": i + 1, "is_amendment": bool(meta.get("is_amendment_doc")), "is_table": True}})
+    doc.close()
+    return out
+
+
 def _file_hash(p: Path) -> str:
     return hashlib.md5(p.read_bytes()).hexdigest()
 
@@ -141,6 +179,8 @@ def ingest(force: bool = False) -> dict:
                   f"text — this book is scanned and needs OCR. Run e.g. "
                   f"`ocrmypdf in.pdf out.pdf` (brew install ocrmypdf), then re-ingest the OCR'd copy.")
         chunks = chunk_pages(pages, meta)
+        if settings.extract_tables:
+            chunks += _table_chunks(pdf, meta)      # structured (markdown) tables alongside text
         if not chunks:
             continue
 

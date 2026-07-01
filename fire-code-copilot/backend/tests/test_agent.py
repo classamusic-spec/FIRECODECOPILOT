@@ -52,6 +52,26 @@ def test_refuses_to_fabricate(monkeypatch):
     assert "UNVERIFIED CITATION" in res.answer
 
 
+def test_confidence_band_high(monkeypatch):
+    monkeypatch.setattr(agent.settings, "use_reranker", True)  # scores are meaningful
+    _patch(monkeypatch, "Per §903.2.8, yes.")                  # SOURCES score = 0.9
+    res = agent.ask("q")
+    assert res.confidence == 0.9 and res.confidence_band == "high"
+
+
+def test_low_confidence_auto_flags_review_queue(monkeypatch):
+    monkeypatch.setattr(agent.settings, "use_reranker", True)
+    weak = [Scored(SOURCES[0].chunk, 0.05)]                    # below the deep/low floor
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: weak)
+    monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
+    captured = {}
+    monkeypatch.setattr("app.feedback.record_feedback",
+                        lambda **kw: captured.update(kw) or {"id": 1})
+    res = agent.ask("q")
+    assert res.confidence_band == "low"
+    assert captured.get("low_confidence") is True
+
+
 def test_retrieve_mode_returns_sources_without_generation(monkeypatch):
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: SOURCES)
     # llm.chat must NOT be called in retrieve mode.

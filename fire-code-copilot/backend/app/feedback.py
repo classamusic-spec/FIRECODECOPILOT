@@ -74,16 +74,63 @@ def promote_verified(*, question: str, corrected_answer: str,
     # Match on question similarity; show the corrected answer (with the question for context).
     qvec = embeddings.embed([question], input_type="query")[0]
     doc = f"Q: {question}\nVERIFIED ANSWER: {corrected_answer}"
-    vid = f"verified-{abs(hash((question, corrected_answer)))}"
+    # Stable ID from the NORMALIZED question, so re-verifying the same question EDITS (replaces)
+    # the entry instead of piling up near-duplicates on every reword.
+    vid = _verified_id(question)
     meta = {
         "verified": True,
         "book": "VERIFIED",
         "edition": edition or settings.active_collection,
         "section": ", ".join(sections) if sections else "(verified answer)",
+        "question": question,
+        "answer": corrected_answer,
+        "sections_json": json.dumps(sections),
         "verified_at": _now(),
     }
     vcoll.upsert(ids=[vid], documents=[doc], metadatas=[meta], embeddings=[qvec])
     return {"id": vid, "collection": settings.verified_collection, "sections": sections}
+
+
+def _verified_id(question: str) -> str:
+    """Deterministic id keyed on the normalized question (dedupe/edit anchor)."""
+    import hashlib as _h
+    norm = " ".join((question or "").lower().split())
+    return "verified-" + _h.md5(norm.encode("utf-8")).hexdigest()[:16]
+
+
+def _verified_collection():
+    import chromadb
+    return chromadb.PersistentClient(path=settings.chroma_dir).get_or_create_collection(
+        settings.verified_collection)
+
+
+def list_verified(limit: int = 200) -> list[dict]:
+    """All confirmed answers in the Verified Answer Library, for review/management."""
+    try:
+        got = _verified_collection().get(include=["metadatas"])
+    except Exception:
+        return []
+    out = []
+    for vid, m in zip(got.get("ids", []) or [], got.get("metadatas", []) or []):
+        m = m or {}
+        try:
+            secs = json.loads(m.get("sections_json", "[]"))
+        except (ValueError, TypeError):
+            secs = []
+        out.append({"id": vid, "question": m.get("question", ""), "answer": m.get("answer", ""),
+                    "sections": secs, "edition": m.get("edition", ""),
+                    "verified_at": m.get("verified_at", "")})
+    out.sort(key=lambda v: v.get("verified_at", ""), reverse=True)
+    return out[:limit]
+
+
+def delete_verified(vid: str) -> dict:
+    """Remove a verified answer (a wrong/stale one shouldn't keep surfacing as [VERIFIED])."""
+    try:
+        _verified_collection().delete(ids=[vid])
+        return {"deleted": True, "id": vid}
+    except Exception as e:
+        return {"deleted": False, "id": vid, "error": str(e)}
 
 
 def review_queue(limit: int = 50) -> list[dict]:

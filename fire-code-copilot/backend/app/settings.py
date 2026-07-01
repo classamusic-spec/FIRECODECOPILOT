@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     # auto-escalates to DEEP_PROVIDER/DEEP_MODEL (a stronger model) for one retry.
     deep_escalate_below: float = 0.2
 
+    # --- Confidence surfacing (heuristic; needs the reranker for a numeric signal) ---
+    confidence_high_above: float = 0.6              # top rerank score >= this -> "high"
+    # (low band uses deep_escalate_below; between the two is "medium".)
+    auto_flag_low_confidence: bool = True           # log low-confidence answers to the review queue
+
+    # --- Table extraction ---
+    extract_tables: bool = True                     # emit ruled tables as their own markdown chunks
+
     # Generation tuning
     temperature: float = 0.1                         # low for code work
 
