@@ -72,6 +72,25 @@ def test_low_confidence_auto_flags_review_queue(monkeypatch):
     assert captured.get("low_confidence") is True
 
 
+def test_deep_mode_runs_second_retrieval_pass(monkeypatch):
+    monkeypatch.setattr(agent.settings, "use_reranker", True)
+    calls = []
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
+    monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
+    agent.ask("sprinkler?", deep=True, building_context="Existing R-2, 4 stories, not sprinklered")
+    assert len(calls) == 2                                   # first pass, then the deep rewrite pass
+    assert calls[1].get("extra_queries") and "building details" in calls[1]["extra_queries"][0]
+
+
+def test_deep_mode_without_context_no_second_pass(monkeypatch):
+    monkeypatch.setattr(agent.settings, "use_reranker", True)
+    calls = []
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
+    monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
+    agent.ask("sprinkler?", deep=True)                      # nothing to rewrite -> single retrieval
+    assert len(calls) == 1
+
+
 def test_retrieve_mode_returns_sources_without_generation(monkeypatch):
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: SOURCES)
     # llm.chat must NOT be called in retrieve mode.
