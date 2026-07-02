@@ -29,7 +29,11 @@ you the exact source text so you can verify.
 - 🔖 **Cites the exact section and page**, and shows the quoted source so you can verify at a glance.
   It **refuses to fabricate** — every claim is checked against your books.
 - 🔗 **Click any citation to verify** — jump straight to the matching source and highlight the exact
-  line the answer is built on.
+  line the answer is built on, or open the **actual typeset page** of the book beside it.
+- 🧠 **Remembers the conversation** — follow-ups like *"what about existing buildings?"* retrieve and
+  answer with the topic they refer to.
+- 📖 **Built-in Library** — a setup checklist, per-book edition settings, and re-indexing with a live
+  progress bar. Plus one-command **backup/restore** of everything the tool has learned from you.
 - 🧭 **Asks the right follow-up questions** (occupancy, new vs. existing, sprinklered…) before
   committing, and shows a **confidence** chip on every answer.
 - 🗂️ **Organize by "matter"** — file conversations under a street address or permit # so a job's
@@ -63,8 +67,10 @@ cd fire-code-copilot/frontend && npm install && npm run dev
 | ![](fire-code-copilot/docs/screenshots/16-edition-selector.png) | ![](fire-code-copilot/docs/screenshots/02-hero-source-expanded.png) |
 | **Asks clarifying questions** | **Review + Verified ("Marshal desk")** |
 | ![](fire-code-copilot/docs/screenshots/03-clarify-desktop.png) | ![](fire-code-copilot/docs/screenshots/12-verified-tab.png) |
-| **Export answer + citations** | **Mobile** |
-| ![](fire-code-copilot/docs/screenshots/13-export-pdf.png) | ![](fire-code-copilot/docs/screenshots/05-hero-mobile.png) |
+| **The Library — books, editions, indexing with live progress** | **Export answer + citations** |
+| ![](fire-code-copilot/docs/screenshots/17-library.png) | ![](fire-code-copilot/docs/screenshots/13-export-pdf.png) |
+| **Mobile** | |
+| ![](fire-code-copilot/docs/screenshots/05-hero-mobile.png) | |
 
 ## Get it running on your Mac Studio
 
@@ -118,6 +124,7 @@ query ─► retrieve ─► agent (local model OR Claude) ─► streamed, cita
 | [`docs/ROADMAP.md`](fire-code-copilot/docs/ROADMAP.md) | What's shipped and what's next |
 | [`docs/LOCAL_MODELS.md`](fire-code-copilot/docs/LOCAL_MODELS.md) | Running fully local (server / GGUF / MLX) |
 | [`docs/COPYRIGHT_AND_LICENSING.md`](fire-code-copilot/docs/COPYRIGHT_AND_LICENSING.md) | Legal guardrails |
+| [`docs/MONETIZATION_PLAN.md`](fire-code-copilot/docs/MONETIZATION_PLAN.md) | If this ever becomes a product: what's sellable, pricing, prerequisites |
 
 ---
 
