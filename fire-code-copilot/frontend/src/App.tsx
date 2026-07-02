@@ -30,14 +30,31 @@ import {
 import ChatMessage from "./components/ChatMessage";
 import CycleBanner from "./components/CycleBanner";
 import ReviewQueue from "./components/ReviewQueue";
+import LibraryDrawer from "./components/LibraryDrawer";
 import HistoryDrawer from "./components/HistoryDrawer";
-import { SendIcon, StopIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon, PlusIcon, ClockIcon } from "./components/icons";
+import { SendIcon, StopIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon, PlusIcon, ClockIcon, BookIcon } from "./components/icons";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}-${(_seq++).toString(36)}`;
 
 /** Distance (px) from the bottom within which we treat the log as "at bottom". */
 const NEAR_BOTTOM_PX = 140;
+
+/**
+ * The last few completed Q&A exchanges, oldest-first — sent with each request so the backend
+ * can resolve follow-ups ("what about existing buildings?") against what they refer to.
+ */
+function recentExchanges(turns: Turn[]): { question: string; answer: string }[] {
+  const out: { question: string; answer: string }[] = [];
+  for (let i = 0; i < turns.length - 1; i++) {
+    const u = turns[i];
+    const a = turns[i + 1];
+    if (u.role === "user" && a.role === "assistant" && a.status === "done" && a.response?.answer) {
+      out.push({ question: u.text, answer: a.response.answer });
+    }
+  }
+  return out.slice(-3);
+}
 
 /**
  * Repair turns restored from storage after an interrupted session: a turn saved while
@@ -97,6 +114,7 @@ export default function App() {
 
   const [health, setHealth] = useState<Health | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // Stored code-edition collections + the marshal's current pick. `selectedCollection`
   // holds a collection NAME when a legacy edition is chosen, or null for the active one.
@@ -218,6 +236,8 @@ export default function App() {
     if (!question || sending) return;
     const ctx = buildingContext.trim();
     const assistantId = uid();
+    // Snapshot follow-up memory BEFORE appending the new turns.
+    const history = recentExchanges(turns);
 
     setTurns((prev) => [
       ...prev,
@@ -238,7 +258,9 @@ export default function App() {
     try {
       await askStream(
         // `collection: undefined` = the backend's active edition; a name = a legacy cycle.
-        { question, building_context: ctx || undefined, deep, provider, collection: selectedCollection ?? undefined },
+        { question, building_context: ctx || undefined, deep, provider,
+          collection: selectedCollection ?? undefined,
+          history: history.length ? history : undefined },
         {
           // Append each token to the in-progress text. Use the functional updater
           // so rapid back-to-back tokens compose instead of clobbering each other.
@@ -405,6 +427,7 @@ export default function App() {
         provider,
         // The follow-up must search the SAME edition the original question did.
         collection: selectedCollection ?? undefined,
+        history: recentExchanges(turns),
       });
       patchTurn(turnId, { response: res, clarifying: false, status: "done" });
     } catch (e) {
@@ -490,6 +513,18 @@ export default function App() {
               )}
 
               {/* Open the flagged-questions review drawer. */}
+              {/* Library — books, editions, and indexing. */}
+              <button
+                type="button"
+                onClick={() => setLibraryOpen(true)}
+                aria-label="Open the code-book library"
+                title="Library"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100"
+              >
+                <BookIcon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Library</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setReviewOpen(true)}
@@ -656,6 +691,17 @@ export default function App() {
 
       {/* Flagged-questions review + verified-answers drawer (slide-over). */}
       <ReviewQueue open={reviewOpen} onClose={() => setReviewOpen(false)} />
+
+      {/* Code-book Library: setup checklist, manifest editor, indexing with live progress. */}
+      <LibraryDrawer
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onIndexed={() => {
+          getCollections()
+            .then((r) => setCollections(r.collections))
+            .catch(() => {/* selector just keeps its previous list */});
+        }}
+      />
 
       {/* Local conversation-history drawer (slide-over). */}
       <HistoryDrawer

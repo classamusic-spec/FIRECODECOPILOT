@@ -26,6 +26,13 @@ export type Mode = "answer" | "retrieve";
 export type Rating = "up" | "down";
 
 /** Metadata attached to each retrieved code chunk. All fields optional per contract. */
+/** One prior Q&A exchange sent with a follow-up question so the backend can resolve
+ *  references like "what about existing buildings?" (retrieval + prompt context). */
+export interface Exchange {
+  question: string;
+  answer: string;
+}
+
 export interface SourceMetadata {
   book?: string;
   edition?: string;
@@ -35,6 +42,8 @@ export interface SourceMetadata {
   is_table?: boolean;
   verified?: boolean;
   controlling?: boolean;
+  /** the PDF filename this chunk came from (drives the "view page" verification image) */
+  source?: string;
 }
 
 /** One retrieved source chunk: the quoted text plus its provenance metadata. */
@@ -73,6 +82,8 @@ export interface AskRequest {
   provider?: Provider;
   /** Which code-edition collection to search; omit/empty = the backend's active edition. */
   collection?: string;
+  /** prior exchanges in this conversation (follow-up memory); send the last few only */
+  history?: Exchange[];
 }
 
 /** One selectable code-edition collection (a stored cycle) from GET /collections. */
@@ -105,6 +116,8 @@ export interface ClarifyRequest {
   /** Same semantics as AskRequest.collection — the clarify follow-up must search the SAME
    *  edition the original question did, or the final answer silently switches code cycles. */
   collection?: string;
+  /** prior exchanges in this conversation (follow-up memory) */
+  history?: Exchange[];
 }
 
 /** Request body for POST /feedback. */
@@ -445,4 +458,91 @@ export function deleteVerified(id: string): Promise<{ deleted: boolean; id: stri
   return request<{ deleted: boolean; id: string }>(`/verified/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+}
+
+/* --------------------------------------------------------------- Library -- */
+
+/** One code book in the Library (GET /books): file + manifest fields + indexed state. */
+export interface BookEntry {
+  file: string;
+  book: string;
+  edition: string;
+  collection: string;
+  is_amendment_doc: boolean;
+  in_manifest: boolean;
+  indexed: boolean;
+  indexed_collection: string;
+  chunks: number;
+}
+
+/** Every PDF in the books folder with manifest + index state (GET /books). */
+export function getBooks(): Promise<{ books: BookEntry[]; active_collection: string }> {
+  if (DEMO) return demoApi.books();
+  return request<{ books: BookEntry[]; active_collection: string }>("/books");
+}
+
+/** Save the books manifest — which book maps to which edition/collection (PUT /books-manifest). */
+export function saveBooksManifest(
+  entries: Record<string, Partial<BookEntry>>,
+): Promise<{ saved: number }> {
+  if (DEMO) return demoApi.saveBooksManifest();
+  return request<{ saved: number }>("/books-manifest", {
+    method: "PUT",
+    body: JSON.stringify(entries),
+  });
+}
+
+/** One progress event from POST /ingest/stream. */
+export interface IngestEvent {
+  type: "start" | "file" | "file_done" | "removed" | "error" | "done";
+  files?: number;
+  file?: string;
+  status?: string;
+  chunks?: number;
+  collection?: string;
+  message?: string;
+  summary?: Record<string, unknown>;
+}
+
+/** Run ingestion with LIVE progress (POST /ingest/stream, SSE). Resolves when the run ends. */
+export async function ingestStream(
+  force: boolean,
+  onEvent: (ev: IngestEvent) => void,
+): Promise<void> {
+  if (DEMO) return demoApi.ingestStream(onEvent);
+  const res = await fetch(`${API_BASE}/ingest/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(res.status, text || `${res.status} ${res.statusText}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          onEvent(JSON.parse(line.slice(5).trim()) as IngestEvent);
+        } catch {
+          /* ignore malformed lines */
+        }
+      }
+    }
+  }
+}
+
+/** URL of the rendered code-book page image (GET /page-image) — for citation verification. */
+export function pageImageUrl(source: string, page: number): string {
+  return `${API_BASE}/page-image?source=${encodeURIComponent(source)}&page=${page}`;
 }
