@@ -273,12 +273,29 @@ to see the model code beside the controlling CT amendment:
 2. (New cycle only) edit `config/code_cycles.yaml`: move `pending_cycle` → `active_cycle`, and set
    `ACTIVE_COLLECTION` in `.env` to the new cycle name. Each cycle is its own searchable
    collection, so old editions stay available for existing-building questions.
-3. Re-run `cd backend && source .venv/bin/activate && python -m app.ingest`.
+3. Re-run `cd backend && source .venv/bin/activate && python -m app.ingest` — or just open the
+   **Library** panel in the app and click *Index new / changed* (it shows live progress).
    - **Updating an existing book** (fixing a scan, dropping in a corrected PDF)? Just re-run
      ingest — the file's old chunks are purged and replaced, so outdated text can't linger and be
      cited. *(One-time only: if your index predates this behavior, delete `data/chroma` once and
      re-ingest to clear any stale chunks from earlier runs.)*
 4. Run `bash scripts/check_containment.sh` to confirm nothing copyrighted is tracked by git.
+
+## Back up what it has learned
+
+Your verified answers and feedback history are the tool's compounding memory — protect them:
+
+```bash
+cd backend && source .venv/bin/activate
+python -m app.backup                     # writes data/backups/fcc-backup-<date>.zip
+python -m app.backup --out ~/Backups     # or straight into a synced/backed-up folder
+python -m app.backup --restore FILE.zip  # merge a backup into a (new) install
+```
+
+Backups hold your confirmed answers, 👍/👎 history, book settings, and cycle config — **not** the
+book index (that's rebuilt any time with ingest). Restoring re-embeds and merges, so it's safe to
+run on top of an existing install and survives switching embedding models. Keep backups private —
+they can contain short quotes from your licensed books.
 
 ---
 
