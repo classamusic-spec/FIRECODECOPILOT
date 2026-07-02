@@ -3,6 +3,14 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+class Exchange(BaseModel):
+    """One prior Q&A exchange from the current conversation, oldest-first in the list. Lets a
+    follow-up like "what about existing buildings?" retrieve and answer with the topic it refers
+    to. The client sends only the last few; the server also caps how much it uses."""
+    question: str
+    answer: str = ""
+
+
 class AskRequest(BaseModel):
     question: str
     mode: str = "answer"            # "answer" | "retrieve"
@@ -10,6 +18,7 @@ class AskRequest(BaseModel):
     deep: bool = False              # escalate to DEEP_PROVIDER/DEEP_MODEL for hard questions
     provider: str | None = None     # override generation backend: "local" | "anthropic"
     collection: str | None = None   # query a specific edition/cycle collection (default: active)
+    history: list[Exchange] = []    # prior exchanges in this conversation (follow-up memory)
 
 
 class ClarifyRequest(BaseModel):
@@ -21,6 +30,7 @@ class ClarifyRequest(BaseModel):
     deep: bool = False
     provider: str | None = None
     collection: str | None = None
+    history: list[Exchange] = []    # prior exchanges in this conversation (follow-up memory)
 
 
 class IngestRequest(BaseModel):

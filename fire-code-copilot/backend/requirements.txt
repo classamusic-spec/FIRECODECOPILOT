@@ -35,3 +35,4 @@ python-dateutil        # code-cycle date math
 # --- Dev / tests ---
 pytest                 # offline test suite (chunking, citations, agent, retrieval, cycles)
 httpx                  # FastAPI TestClient (API smoke tests)
+hypothesis             # property tests for chunking invariants

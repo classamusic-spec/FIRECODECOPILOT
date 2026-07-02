@@ -36,8 +36,9 @@ SECTION_KEYWORD = re.compile(r"^\s*(SECTION|CHAPTER|TABLE|APPENDIX|ANNEX)\s+([0-
 # DOCUMENTS are tagged wholesale via is_amendment_doc, so prose phrasing there needs no regex.
 AMENDMENT_MARKER = re.compile(r"\((?:amd|add|del|sub)\)", re.IGNORECASE)
 
-TARGET_WORDS = 450        # ~600 tokens
-OVERLAP_WORDS = 60
+TARGET_WORDS = 450        # fallback word window when tiktoken isn't available
+TARGET_TOKENS = 600       # the real budget: what TARGET_WORDS≈450 was approximating
+OVERLAP_WORDS = 60        # FIXED overlap between windows — parent stitching depends on it
 HEADER_MAX_WORDS = 12     # running headers/footers are short; don't strip long lines as boilerplate
 PROSE_MIN_WORDS = 12      # a line this long (or sentence-final) reads as body, not a table row
 
@@ -198,14 +199,41 @@ def chunk_pages(pages: list[tuple[int, str]], book_meta: dict) -> list[dict]:
     return chunks
 
 
+_encoder = None
+
+
+def _token_ratio(text: str) -> float | None:
+    """Tokens-per-word for `text` via tiktoken, or None when unavailable. Legal prose runs
+    ~1.3 tokens/word, but token-dense content (dotted section numbers, tables) runs far higher —
+    a word-count window alone lets those chunks blow past the model's budget."""
+    global _encoder
+    try:
+        if _encoder is None:
+            import tiktoken
+            _encoder = tiktoken.get_encoding("cl100k_base")
+        words = len(text.split())
+        return len(_encoder.encode(text)) / max(1, words)
+    except Exception:
+        return None
+
+
 def _split_long(text: str) -> list[str]:
-    """Sub-split a section that exceeds TARGET_WORDS, with overlap; never split tiny sections."""
+    """Sub-split an over-budget section into windows, with overlap; never split tiny sections.
+
+    The split DECISION is token-aware (window sized so each piece lands near TARGET_TOKENS);
+    the split MECHANICS stay word-based with a FIXED OVERLAP_WORDS, because parent-document
+    stitching (retriever._stitch_parent) reconstructs the section by dropping exactly that many
+    words from each subsequent window — variable overlap would corrupt the reconstruction.
+    """
     words = text.split()
-    if len(words) <= TARGET_WORDS:
+    ratio = _token_ratio(text)
+    window = TARGET_WORDS if ratio is None else int(TARGET_TOKENS / ratio)
+    window = max(2 * OVERLAP_WORDS, min(TARGET_WORDS, window))   # sane bounds; > overlap
+    if len(words) <= window:
         return [text]
     out, start = [], 0
     while start < len(words):
-        end = min(start + TARGET_WORDS, len(words))
+        end = min(start + window, len(words))
         out.append(" ".join(words[start:end]))
         if end == len(words):
             break

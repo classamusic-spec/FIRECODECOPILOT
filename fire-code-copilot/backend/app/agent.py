@@ -91,8 +91,13 @@ def _flag_low_confidence(question, answer, sources, building_context, band) -> N
 
 def ask(question: str, *, mode: str = "answer", building_context: str = "",
         active_cycle_block: str = "", deep: bool = False,
-        provider: str | None = None, collection: str | None = None) -> AgentResult:
-    scored = retrieve_scored(question, collection=collection)
+        provider: str | None = None, collection: str | None = None,
+        history: list[dict] | None = None) -> AgentResult:
+    # Follow-up memory: a context-carrying query variant built from the previous question, fused
+    # with the literal question (RRF), so "what about existing buildings?" retrieves the topic
+    # it refers to. Reranking still scores against the marshal's ORIGINAL wording.
+    extra = _history_queries(question, history)
+    scored = retrieve_scored(question, collection=collection, extra_queries=extra or None)
     chunks = [s.chunk for s in scored]
 
     if mode == "retrieve":
@@ -109,13 +114,15 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
     # Deep mode also does a SECOND retrieval pass with a rewritten query (folding in the building
     # context), then reranks the union — not just a model swap.
     if use_deep and (rewrite := _deep_rewrite(question, building_context)):
-        scored = retrieve_scored(question, collection=collection, extra_queries=[rewrite])
+        scored = retrieve_scored(question, collection=collection,
+                                 extra_queries=extra + [rewrite])
         chunks = [s.chunk for s in scored]
 
     conf, band = _confidence(scored)
 
     system = _system_prompt(active_cycle_block)
-    user = _build_user_block(question, building_context, render_sources(chunks)) + _OUTPUT_PROTOCOL
+    user = _build_user_block(question, building_context, render_sources(chunks),
+                             history=history) + _OUTPUT_PROTOCOL
 
     gen_provider = provider or (settings.deep_provider if use_deep else settings.generation_provider)
     model = settings.deep_model if use_deep else None
@@ -142,7 +149,8 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
 
 
 def ask_stream(question: str, *, building_context: str = "", active_cycle_block: str = "",
-               deep: bool = False, provider: str | None = None, collection: str | None = None):
+               deep: bool = False, provider: str | None = None, collection: str | None = None,
+               history: list[dict] | None = None):
     """Streaming twin of ask(): yields event dicts for Server-Sent Events.
 
     Event types (exactly one of clarify/meta terminates the answer, then done):
@@ -156,7 +164,8 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     clarification JSON, so we buffer silently (never stream raw JSON to the UI) and resolve it
     at the end; otherwise we stream tokens as they arrive.
     """
-    scored = retrieve_scored(question, collection=collection)
+    extra = _history_queries(question, history)
+    scored = retrieve_scored(question, collection=collection, extra_queries=extra or None)
     chunks = [s.chunk for s in scored]
 
     top_score = max((s.score for s in scored), default=0.0)
@@ -164,13 +173,15 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     use_deep = deep or auto_deep
 
     if use_deep and (rewrite := _deep_rewrite(question, building_context)):
-        scored = retrieve_scored(question, collection=collection, extra_queries=[rewrite])
+        scored = retrieve_scored(question, collection=collection,
+                                 extra_queries=extra + [rewrite])
         chunks = [s.chunk for s in scored]
 
     conf, band = _confidence(scored)
 
     system = _system_prompt(active_cycle_block)
-    user = _build_user_block(question, building_context, render_sources(chunks)) + _OUTPUT_PROTOCOL
+    user = _build_user_block(question, building_context, render_sources(chunks),
+                             history=history) + _OUTPUT_PROTOCOL
     gen_provider = provider or (settings.deep_provider if use_deep else settings.generation_provider)
     model = settings.deep_model if use_deep else None
 
@@ -258,9 +269,50 @@ def _parse_clarification(draft: str) -> dict | None:
     return obj if obj.get("needs_clarification") is True else None
 
 
-def _build_user_block(question: str, building_context: str, sources: str) -> str:
+# Follow-up memory bounds: how many prior exchanges inform the prompt, and how much of each
+# prior ANSWER is included (answers are long; the topic usually lives in the first lines).
+_HISTORY_MAX_EXCHANGES = 3
+_HISTORY_ANSWER_CHARS = 600
+
+
+def _history_queries(question: str, history: list[dict] | None) -> list[str]:
+    """A context-carrying retrieval variant for follow-up questions, built deterministically
+    from the PREVIOUS question. "what about existing buildings?" alone retrieves nothing useful;
+    "<prev question> — follow-up: <question>" carries the topic terms. Fused via RRF alongside
+    the literal question, so a self-contained question is never hurt by the extra variant."""
+    if not history:
+        return []
+    prev_q = str((history[-1] or {}).get("question", "")).strip()
+    if not prev_q or prev_q == question.strip():
+        return []
+    return [f"{prev_q} — follow-up: {question}"]
+
+
+def _history_block(history: list[dict] | None) -> str:
+    """Compact prior-conversation block so the model can resolve references like "that section"
+    or "what about existing buildings?". Answers are truncated to keep the context lean."""
+    if not history:
+        return ""
+    lines = ["PRIOR CONVERSATION (context only — the current question may refer to it):"]
+    for ex in history[-_HISTORY_MAX_EXCHANGES:]:
+        q = str((ex or {}).get("question", "")).strip()
+        a = str((ex or {}).get("answer", "")).strip()
+        if not q:
+            continue
+        if len(a) > _HISTORY_ANSWER_CHARS:
+            a = a[:_HISTORY_ANSWER_CHARS].rstrip() + " …"
+        lines.append(f"Q: {q}")
+        if a:
+            lines.append(f"A: {a}")
+    return "\n" + "\n".join(lines) + "\n" if len(lines) > 1 else ""
+
+
+def _build_user_block(question: str, building_context: str, sources: str,
+                      history: list[dict] | None = None) -> str:
     ctx = f"\nBUILDING CONTEXT PROVIDED BY MARSHAL:\n{building_context}\n" if building_context else ""
+    past = _history_block(history)
     return (
+        f"{past}"
         f"QUESTION:\n{question}\n{ctx}\n"
         f"RETRIEVED SOURCE EXCERPTS (you may ONLY cite from these):\n{sources}\n\n"
         f"Answer per your instructions. If key building facts are missing and they change the "
