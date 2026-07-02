@@ -312,6 +312,35 @@ export const demoCollections: CollectionsResponse = {
   ],
 };
 
+/** The Library, in demo: two sample books, one already indexed. Illustrative only. */
+export const demoBooks = {
+  active_collection: "csfsc_2022",
+  books: [
+    { file: "ifc-2021.pdf", book: "IFC", edition: "2021", collection: "csfsc_2022",
+      is_amendment_doc: false, in_manifest: true, indexed: true,
+      indexed_collection: "csfsc_2022", chunks: 640 },
+    { file: "ct-amendments-2022.pdf", book: "CSFSC", edition: "2022", collection: "csfsc_2022",
+      is_amendment_doc: true, in_manifest: true, indexed: true,
+      indexed_collection: "csfsc_2022", chunks: 172 },
+  ],
+};
+
+/** Simulated ingest progress for the demo Library. */
+async function demoIngest(onEvent: (ev: unknown) => void): Promise<void> {
+  const events = [
+    { type: "start", files: 2 },
+    { type: "file", file: "ifc-2021.pdf", status: "indexing" },
+    { type: "file_done", file: "ifc-2021.pdf", chunks: 640, collection: "csfsc_2022" },
+    { type: "file", file: "ct-amendments-2022.pdf", status: "indexing" },
+    { type: "file_done", file: "ct-amendments-2022.pdf", chunks: 172, collection: "csfsc_2022" },
+    { type: "done", summary: { chunks_added: 812 } },
+  ];
+  for (const ev of events) {
+    await delay(null, 350);
+    onEvent(ev);
+  }
+}
+
 /** Network short-circuits used by lib/api when DEMO is on. */
 export const demoApi = {
   ask: () => delay(DEMO_VARIANT === "clarify" ? demoClarify : demoAnswer),
@@ -325,4 +354,8 @@ export const demoApi = {
   review: () => delay({ items: demoReview }),
   verified: () => delay({ items: demoVerified }),
   deleteVerified: (id: string) => delay({ deleted: true, id }),
+  books: () => delay(demoBooks, 150),
+  saveBooksManifest: () => delay({ saved: 2 }, 250),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ingestStream: (onEvent: (ev: any) => void) => demoIngest(onEvent),
 };

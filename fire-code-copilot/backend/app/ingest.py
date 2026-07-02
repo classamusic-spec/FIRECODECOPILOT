@@ -239,12 +239,24 @@ def _save_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2))
 
 
-def ingest(force: bool = False) -> dict:
+def ingest(force: bool = False, on_event=None) -> dict:
+    """Index every PDF in the books folder. `on_event`, when given, receives progress dicts
+    ({"type": "start"|"file"|"file_done"|"removed"|"done", ...}) so a UI can show live progress
+    instead of staring at a blocked request."""
     import chromadb
+
+    def emit(ev: dict) -> None:
+        if on_event:
+            try:
+                on_event(ev)
+            except Exception:
+                pass  # progress reporting must never break indexing
+
     books_dir = Path(os.path.expanduser(settings.code_books_dir))
     pdfs = sorted(books_dir.glob("*.pdf"))
     if not pdfs:
         return {"error": f"No PDFs found in {books_dir}. Put your code books there."}
+    emit({"type": "start", "files": len(pdfs)})
 
     manifest = _books_manifest()
     state = _load_json(STATE_FILE)
@@ -267,8 +279,10 @@ def ingest(force: bool = False) -> dict:
         stamp = f"{h}|{cname}"                        # re-ingest if the file OR its collection changed
         if not force and state.get(pdf.name) == stamp:
             summary["skipped"].append(pdf.name)
+            emit({"type": "file", "file": pdf.name, "status": "skipped"})
             continue
 
+        emit({"type": "file", "file": pdf.name, "status": "indexing"})
         pages, pdf_info = _read_pdf(pdf)
         if pdf_info["needs_ocr"]:
             summary.setdefault("needs_ocr", []).append(
@@ -323,6 +337,7 @@ def ingest(force: bool = False) -> dict:
                                                "amendment_doc": meta["is_amendment_doc"]})
         per_collection[cname]["chunks"] += len(chunks)
         summary["chunks_added"] += len(chunks)
+        emit({"type": "file_done", "file": pdf.name, "chunks": len(chunks), "collection": cname})
         print(f"  indexed {pdf.name}: {len(chunks)} chunks -> collection '{cname}'")
 
     # Files DELETED from the books folder: purge their chunks from every collection that holds
@@ -338,6 +353,7 @@ def ingest(force: bool = False) -> dict:
                 files.pop(gone, None)
         state.pop(gone, None)
         summary.setdefault("removed", []).append(gone)
+        emit({"type": "removed", "file": gone})
         print(f"  removed {gone}: purged its chunks (file no longer in the books folder)")
 
     _save_json(STATE_FILE, state)
@@ -350,7 +366,62 @@ def ingest(force: bool = False) -> dict:
 
     summary["collections"] = {k: dict(v) for k, v in per_collection.items()}
     summary["active_collection"] = settings.active_collection
+    emit({"type": "done", "summary": summary})
     return summary
+
+
+def list_books() -> list[dict]:
+    """Every PDF in the books folder with its manifest entry (or heuristics) and indexed state —
+    what the Library UI shows. Filenames + metadata only; never any code text."""
+    books_dir = Path(os.path.expanduser(settings.code_books_dir))
+    manifest = _books_manifest()
+    state = _load_json(STATE_FILE)
+    collections_idx = _load_json(COLLECTIONS_FILE)
+    indexed_in: dict[str, tuple[str, int]] = {}
+    for cname, files in collections_idx.items():
+        for fname, info in files.items():
+            indexed_in[fname] = (cname, int(info.get("chunks", 0)))
+    out = []
+    for pdf in sorted(books_dir.glob("*.pdf")):
+        meta = _meta_for(pdf, manifest)
+        coll, chunks = indexed_in.get(pdf.name, ("", 0))
+        out.append({
+            "file": pdf.name,
+            "book": meta["book"],
+            "edition": meta["edition"],
+            "collection": meta["collection"],
+            "is_amendment_doc": meta["is_amendment_doc"],
+            "in_manifest": pdf.name in manifest,
+            "indexed": pdf.name in state,
+            "indexed_collection": coll,
+            "chunks": chunks,
+        })
+    return out
+
+
+# Manifest fields the UI may set; anything else in the payload is dropped.
+_MANIFEST_FIELDS = ("book", "edition", "collection", "is_amendment_doc")
+
+
+def save_books_manifest(entries: dict) -> dict:
+    """Write code_books/books.yaml from {filename: {book, edition, collection, is_amendment_doc}}.
+    Only files actually present in the books folder are written (no dangling entries), and only
+    the known fields are kept. The manifest lives in the gitignored books folder."""
+    import yaml
+    books_dir = Path(os.path.expanduser(settings.code_books_dir))
+    present = {p.name for p in books_dir.glob("*.pdf")}
+    clean: dict[str, dict] = {}
+    for fname, fields in (entries or {}).items():
+        if fname not in present or not isinstance(fields, dict):
+            continue
+        entry = {k: fields[k] for k in _MANIFEST_FIELDS if k in fields}
+        if "is_amendment_doc" in entry:
+            entry["is_amendment_doc"] = bool(entry["is_amendment_doc"])
+        if entry:
+            clean[fname] = entry
+    (books_dir / "books.yaml").write_text(
+        yaml.safe_dump(clean, sort_keys=True, allow_unicode=True), encoding="utf-8")
+    return {"saved": len(clean), "manifest": clean}
 
 
 def list_collections() -> list[dict]:

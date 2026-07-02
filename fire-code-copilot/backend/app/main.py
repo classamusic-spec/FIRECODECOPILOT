@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from .settings import settings
 from .models import (AskRequest, ClarifyRequest, IngestRequest, FeedbackRequest, VerifyRequest)
@@ -55,12 +55,17 @@ def _http_errors(fn):
     return wrapped()
 
 
+def _hist(req) -> list[dict]:
+    """History exchanges as plain dicts for the agent."""
+    return [e.model_dump() for e in (req.history or [])]
+
+
 @app.post("/ask")
 def ask(req: AskRequest):
     return _http_errors(lambda: result_dict(agent_ask(
         req.question, mode=req.mode, building_context=req.building_context,
         active_cycle_block=active_cycle_block(), deep=req.deep, provider=req.provider,
-        collection=req.collection)))
+        collection=req.collection, history=_hist(req))))
 
 
 @app.post("/ask/stream")
@@ -74,7 +79,7 @@ def ask_stream(req: AskRequest):
                 res = agent_ask(req.question, mode="retrieve",
                                 building_context=req.building_context,
                                 active_cycle_block=active_cycle_block(),
-                                collection=req.collection)
+                                collection=req.collection, history=_hist(req))
                 d = result_dict(res)
                 yield f"data: {json.dumps({'type': 'meta', 'sources': d['sources'], 'citations_ok': True, 'unverified': [], 'answer_suffix': '', 'escalated': False, 'confidence': d.get('confidence'), 'confidence_band': d.get('confidence_band')})}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -82,7 +87,7 @@ def ask_stream(req: AskRequest):
             for event in agent_ask_stream(
                 req.question, building_context=req.building_context,
                 active_cycle_block=active_cycle_block(), deep=req.deep,
-                provider=req.provider, collection=req.collection):
+                provider=req.provider, collection=req.collection, history=_hist(req)):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:  # never leave the stream hanging on an unexpected error
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
@@ -99,13 +104,91 @@ def clarify(req: ClarifyRequest):
     ctx = "\n".join(c for c in (req.building_context, req.answers) if c.strip())
     return _http_errors(lambda: result_dict(agent_ask(
         req.question, building_context=ctx, active_cycle_block=active_cycle_block(),
-        deep=req.deep, provider=req.provider, collection=req.collection)))
+        deep=req.deep, provider=req.provider, collection=req.collection, history=_hist(req))))
 
 
 @app.post("/ingest")
 def ingest(req: IngestRequest):
     from .ingest import ingest as run_ingest
     return run_ingest(force=req.force)
+
+
+@app.post("/ingest/stream")
+def ingest_stream(req: IngestRequest):
+    """Ingest with LIVE progress via SSE (`data: {json}\\n\\n` events: start | file | file_done |
+    removed | done | error). The plain POST /ingest blocks silently, which on a real book set
+    looks like a hang — this is what the Library UI uses instead."""
+    import queue
+    import threading
+    from .ingest import ingest as run_ingest
+
+    q: queue.Queue = queue.Queue()
+
+    def worker():
+        try:
+            result = run_ingest(force=req.force, on_event=q.put)
+            if "error" in result:
+                q.put({"type": "error", "message": result["error"]})
+                q.put({"type": "done", "summary": result})
+        except Exception as e:
+            q.put({"type": "error", "message": str(e)})
+            q.put({"type": "done", "summary": {}})
+        q.put(None)  # sentinel: stream over
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def sse():
+        while True:
+            ev = q.get()
+            if ev is None:
+                break
+            yield f"data: {json.dumps(ev)}\n\n"
+
+    return StreamingResponse(sse(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/books")
+def books():
+    """The Library: every PDF in the books folder + manifest fields + indexed state."""
+    from .ingest import list_books
+    return {"books": list_books(), "active_collection": settings.active_collection}
+
+
+@app.put("/books-manifest")
+def put_books_manifest(entries: dict):
+    """Save the books manifest (which book → which edition/collection) from the Library UI."""
+    from .ingest import save_books_manifest
+    return save_books_manifest(entries)
+
+
+@app.get("/page-image")
+def page_image(source: str, page: int):
+    """Render ONE page of an ingested code book as a PNG, so the marshal can verify a citation
+    against the real typeset page (not just the extracted text).
+
+    Copyright containment: this serves a single page to the LOCAL UI on request — the same
+    footprint as showing the extracted chunk text. Nothing is stored, exported, or listed;
+    `source` must be a bare filename inside the code-books folder (no path traversal).
+    """
+    import os
+    from pathlib import Path
+    name = Path(source).name
+    if name != source or not name.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="source must be a bare .pdf filename")
+    pdf = Path(os.path.expanduser(settings.code_books_dir)) / name
+    if not pdf.is_file():
+        raise HTTPException(status_code=404, detail=f"{name} is not in your code-books folder")
+    import fitz
+    doc = fitz.open(pdf)
+    try:
+        if not (1 <= page <= len(doc)):
+            raise HTTPException(status_code=404, detail=f"{name} has no page {page}")
+        png = doc[page - 1].get_pixmap(dpi=120).tobytes("png")
+    finally:
+        doc.close()
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.get("/collections")

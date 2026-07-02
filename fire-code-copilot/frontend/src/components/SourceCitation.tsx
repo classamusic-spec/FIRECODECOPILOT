@@ -12,6 +12,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { Source } from "../lib/api";
+import { pageImageUrl } from "../lib/api";
+import { DEMO } from "../demo";
 import { ChevronIcon } from "./icons";
 import { sectionsRelate } from "../lib/sections";
 import { findCitedSpan } from "../lib/citations";
@@ -53,8 +55,14 @@ function referenceLine(meta: Source["metadata"]): string {
 export default function SourceCitation({ source, index, highlight }: Props) {
   const [open, setOpen] = useState(false);
   const [flash, setFlash] = useState(false);
+  const [showPage, setShowPage] = useState(false);
+  const [pageError, setPageError] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const meta = source.metadata ?? {};
+
+  // "View page" needs the source PDF filename + a numeric page, and a real backend (not demo).
+  const pageNum = typeof meta.page === "number" ? meta.page : Number(meta.page);
+  const canShowPage = !DEMO && Boolean(meta.source) && Number.isFinite(pageNum) && pageNum >= 1;
 
   // An amendment is "controlling" CT-adopted text; either flag triggers the badge.
   const isAmendment = Boolean(meta.is_amendment || meta.controlling);
@@ -122,6 +130,34 @@ export default function SourceCitation({ source, index, highlight }: Props) {
           <pre className="scroll-thin max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-steel-300">
             {renderSourceText(source.text, isTarget ? highlight?.section : undefined)}
           </pre>
+
+          {/* Verify against the REAL typeset page: renders the cited PDF page locally.
+              The image is served by the local backend and never leaves the machine. */}
+          {canShowPage && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => { setShowPage((v) => !v); setPageError(false); }}
+                className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-steel-300 transition-colors hover:border-coral-500/40 hover:text-steel-100"
+              >
+                {showPage ? "Hide page" : `View page ${pageNum} in the book`}
+              </button>
+              {showPage && !pageError && (
+                <img
+                  src={pageImageUrl(String(meta.source), pageNum)}
+                  alt={`${meta.book ?? "code book"} page ${pageNum}`}
+                  loading="lazy"
+                  onError={() => setPageError(true)}
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-white"
+                />
+              )}
+              {showPage && pageError && (
+                <p className="mt-2 text-[11px] text-steel-500">
+                  Couldn't load the page image — the book may have moved or been renamed.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

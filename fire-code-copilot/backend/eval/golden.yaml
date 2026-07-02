@@ -41,3 +41,21 @@ cases:
 
   - q: "Sprinklers throughout a building with a Group R fire area"
     expect_section: "903.2.8"
+
+  # Exact-section lookup — locks the reranker-off crowd-out fix (a 907.x query must return
+  # 907.x sources, never be displaced by verified/amendment prepends).
+  - q: "What does section 907.2.9.3 require?"
+    expect_section: "907.2.9.3"
+
+  - q: "Occupant load for a space without fixed seating"
+    expect_section: "1004.5"
+
+  - q: "When are portable fire extinguishers required?"
+    expect_section: "906.1"
+
+  - q: "Standpipe requirements based on building height"
+    expect_section: "905.3.1"
+
+  - q: "Did Connecticut change the Group R-2 fire alarm requirements?"
+    expect_section: "907.2.9.1"
+    expect_controlling_amendment: true

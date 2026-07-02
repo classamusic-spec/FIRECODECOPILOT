@@ -63,6 +63,21 @@ _MODEL_PAGES = [
      "907.2.9.3 Smoke alarms\n"
      "Single- and multiple-station smoke alarms shall be installed in Group R-2 occupancies in\n"
      "accordance with NFPA 72.\n"),
+    (3,
+     "SECTION 905  STANDPIPE SYSTEMS\n"
+     "905.3.1 Height\n"
+     "Class III standpipe systems shall be installed throughout buildings where the floor level\n"
+     "of the highest story is located more than 30 feet above the lowest level of fire\n"
+     "department vehicle access.\n"
+     "SECTION 906  PORTABLE FIRE EXTINGUISHERS\n"
+     "906.1 Where required\n"
+     "Portable fire extinguishers shall be installed in Group A, B, E, F, H, I, M, R-1, R-2,\n"
+     "R-4 and S occupancies, and within 30 feet of commercial cooking equipment.\n"
+     "SECTION 1004  OCCUPANT LOAD\n"
+     "1004.5 Areas without fixed seating\n"
+     "The number of occupants shall be computed at the rate of one occupant per unit of area as\n"
+     "prescribed for the function of the space; for assembly without fixed seats the occupant\n"
+     "load factor shall be applied to the gross or net floor area as indicated.\n"),
 ]
 
 _AMD_PAGES = [
@@ -75,7 +90,11 @@ _AMD_PAGES = [
      "903.2.8.4 Group R-2 existing buildings  (Add)\n"
      "Add a new Section 903.2.8.4: in existing Group R-2 buildings, an automatic sprinkler\n"
      "system shall be installed throughout where required by the State Fire Marshal upon a\n"
-     "change of occupancy or a substantial alteration.\n"),
+     "change of occupancy or a substantial alteration.\n"
+     "907.2.9.1 Group R-2 manual fire alarm systems  (Amd)\n"
+     "Amend Section 907.2.9 by adding: in Connecticut, the manual fire alarm system in Group\n"
+     "R-2 occupancies shall also transmit alarm signals to the municipal fire department where\n"
+     "the building contains more than 8 dwelling units.\n"),
 ]
 
 
