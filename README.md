@@ -125,6 +125,7 @@ query ─► retrieve ─► agent (local model OR Claude) ─► streamed, cita
 | [`docs/LOCAL_MODELS.md`](fire-code-copilot/docs/LOCAL_MODELS.md) | Running fully local (server / GGUF / MLX) |
 | [`docs/COPYRIGHT_AND_LICENSING.md`](fire-code-copilot/docs/COPYRIGHT_AND_LICENSING.md) | Legal guardrails |
 | [`docs/MONETIZATION_PLAN.md`](fire-code-copilot/docs/MONETIZATION_PLAN.md) | If this ever becomes a product: what's sellable, pricing, prerequisites |
+| [`docs/HERMES_MCP.md`](fire-code-copilot/docs/HERMES_MCP.md) | Use it from Hermes / any MCP agent as a local tool |
 
 ---
 
