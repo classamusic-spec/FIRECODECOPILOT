@@ -370,6 +370,7 @@ Architecture, the build plan, the improvement roadmap, and the test suite:
 | `docs/LOCAL_MODELS.md` | Running fully local (server / GGUF / MLX) |
 | `docs/COPYRIGHT_AND_LICENSING.md` | Legal guardrails |
 | `desktop/README.md` | Native desktop app (Tauri) — bundles the UI and manages the backend for you |
+| `docs/HERMES_MCP.md` | Use it from Hermes / any MCP agent (Codex, Claude Desktop) as a local tool |
 
 ```bash
 cd backend && source .venv/bin/activate
