@@ -4,7 +4,7 @@
  * Every type here mirrors the backend contract EXACTLY (see backend/app/models.py
  * and backend/app/agent.py::AgentResult). Do not invent endpoints or fields.
  *
- * Base URL comes from VITE_API_BASE (default http://localhost:8000). The backend
+ * Base URL comes from VITE_API_BASE (default http://localhost:8001). The backend
  * sets permissive CORS, so the browser calls it directly.
  */
 import { DEMO, demoApi } from "../demo";
@@ -12,7 +12,7 @@ import { DEMO, demoApi } from "../demo";
 // Resolve the API base once. import.meta.env values are strings (or undefined).
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, "") ??
-  "http://localhost:8000";
+  "http://localhost:8001";
 
 /* ------------------------------------------------------------------ Types -- */
 
@@ -56,6 +56,17 @@ export interface Source {
 export type ConfidenceBand = "low" | "medium" | "high" | null;
 
 /** The unified response shape returned by /ask and /clarify (AgentResult). */
+
+export interface AnswerTrace {
+  interpreted_query: Record<string, unknown>;
+  retrieval: { dense_terms?: string[]; bm25_terms?: string[]; candidates?: Array<Record<string, unknown>> };
+  reranked: { chunks?: Array<Record<string, unknown>> };
+  controlling_source: Array<Record<string, unknown>>;
+  citation_check: Array<{ section: string; verified: boolean; reason?: string }> ;
+  generation: { model?: string; thinking?: string; confidence?: number | null; confidence_band?: string | null };
+  attempts?: Array<Record<string, unknown>>;
+}
+
 export interface AskResponse {
   mode: string;
   answer: string | null;
@@ -71,6 +82,7 @@ export interface AskResponse {
   confidence: number | null;
   /** bucketed confidence, or null when there is no reranker signal */
   confidence_band: ConfidenceBand;
+  trace?: AnswerTrace;
 }
 
 /** Request body for POST /ask. */
@@ -80,6 +92,8 @@ export interface AskRequest {
   building_context?: string;
   deep?: boolean;
   provider?: Provider;
+  /** Runtime switch among the two resident oMLX generator models. */
+  generator_model?: string;
   /** Which code-edition collection to search; omit/empty = the backend's active edition. */
   collection?: string;
   /** prior exchanges in this conversation (follow-up memory); send the last few only */
@@ -113,6 +127,7 @@ export interface ClarifyRequest {
   building_context?: string;
   deep?: boolean;
   provider?: Provider;
+  generator_model?: string;
   /** Same semantics as AskRequest.collection — the clarify follow-up must search the SAME
    *  edition the original question did, or the final answer silently switches code cycles. */
   collection?: string;
@@ -163,6 +178,39 @@ export interface Health {
   jurisdiction: string;
   generation_provider: string;
   model: string;
+  generator_model?: string;
+  generator_models?: string[];
+  local_base_url?: string;
+  mlx_thinking?: string;
+  deep_provider?: string;
+}
+
+export interface ModelConfig {
+  provider: "local";
+  local_base_url: string;
+  active_generator: string;
+  generator_models: string[];
+  embedding_model: string;
+  reranker_model: string;
+  reranker_enabled: boolean;
+  thinking: string;
+  deep_provider: string;
+}
+
+/** A curated generator that can be explicitly loaded into the local oMLX runtime. */
+export interface RuntimeModel {
+  id: string;
+  label: string;
+  memory_gb: number;
+  description: string;
+  available: boolean;
+}
+
+export interface RuntimeStatus {
+  running: boolean;
+  active_model: string;
+  models: RuntimeModel[];
+  message?: string;
 }
 
 /** One flagged (👎 / low-confidence) question awaiting the marshal's review. */
@@ -265,6 +313,7 @@ export interface StreamHandlers {
     escalated: boolean;
     confidence: number | null;
     confidence_band: ConfidenceBand;
+    trace?: AnswerTrace;
   }) => void;
   /** an `error` event, or a network/HTTP failure */
   onError: (message: string) => void;
@@ -352,6 +401,7 @@ export async function askStream(
           escalated: Boolean(ev.escalated),
           confidence: typeof ev.confidence === "number" ? ev.confidence : null,
           confidence_band: (ev.confidence_band as ConfidenceBand) ?? null,
+          trace: (ev.trace as AnswerTrace | undefined),
         });
         break;
       case "error":
@@ -434,7 +484,60 @@ export function getHealth(): Promise<Health> {
   return request<Health>("/health");
 }
 
+/** Local oMLX model stack exposed by the backend. */
+export function getModelConfig(): Promise<ModelConfig> {
+  if (DEMO) {
+    return Promise.resolve({
+      provider: "local",
+      local_base_url: "http://localhost:8000/v1",
+      active_generator: "mlx-community/gemma-4-26b-a4b-it-4bit",
+      generator_models: ["mlx-community/gemma-4-26b-a4b-it-4bit", "lmstudio-community/granite-4.0-h-small-MLX-4bit"],
+      embedding_model: "BAAI/bge-m3",
+      reranker_model: "BAAI/bge-reranker-v2-m3",
+      reranker_enabled: true,
+      thinking: "off",
+      deep_provider: "off",
+    });
+  }
+  return request<ModelConfig>("/models");
+}
+
 /** The marshal's review queue: 👎/low-confidence questions flagged for follow-up. */
+export function selectGenerator(model: string): Promise<{ active_generator: string; thinking: string }> {
+  if (DEMO) return Promise.resolve({ active_generator: model, thinking: "off" });
+  return post("/models/select", { model });
+}
+
+const DEMO_RUNTIME_MODELS: RuntimeModel[] = [
+  { id: "granite-4.0-h-small-MLX-8bit", label: "Granite", memory_gb: 33.5, description: "Balanced grounded-code generator.", available: true },
+  { id: "gemma-4-26b-a4b-it-4bit", label: "Gemma 4", memory_gb: 15, description: "Lighter local generator for responsive research.", available: true },
+  { id: "Ornith-1.0-35B-bf16", label: "Ornith 35B", memory_gb: 68.7, description: "Largest option; load only when its extra capacity is needed.", available: true },
+];
+
+/** Read local server state without starting it or loading weights. */
+export function getRuntimeStatus(): Promise<RuntimeStatus> {
+  if (DEMO) return Promise.resolve({ running: true, active_model: DEMO_RUNTIME_MODELS[1].id, models: DEMO_RUNTIME_MODELS });
+  return request<RuntimeStatus>("/runtime");
+}
+
+/** Start the managed oMLX service only; it does not load a generator. */
+export function startRuntime(): Promise<RuntimeStatus> {
+  if (DEMO) return Promise.resolve({ running: true, active_model: DEMO_RUNTIME_MODELS[1].id, models: DEMO_RUNTIME_MODELS, message: "Local model server started." });
+  return post<RuntimeStatus>("/runtime/start", {});
+}
+
+/** Explicitly load one selected generator, then make it active for new questions. */
+export function loadRuntimeModel(model: string): Promise<RuntimeStatus & { loaded: boolean }> {
+  if (DEMO) return Promise.resolve({ running: true, active_model: model, models: DEMO_RUNTIME_MODELS, loaded: true, message: "Demo model loaded." });
+  return post<RuntimeStatus & { loaded: boolean }>("/runtime/load", { model });
+}
+
+/** Stop managed oMLX and release all model memory. */
+export function stopRuntime(): Promise<RuntimeStatus> {
+  if (DEMO) return Promise.resolve({ running: false, active_model: "", models: DEMO_RUNTIME_MODELS, message: "Local model server stopped." });
+  return post<RuntimeStatus>("/runtime/stop", {});
+}
+
 export function getReviewQueue(): Promise<ReviewQueue> {
   if (DEMO) return demoApi.review();
   return request<ReviewQueue>("/review-queue");

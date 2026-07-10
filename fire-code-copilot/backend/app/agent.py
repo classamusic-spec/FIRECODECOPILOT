@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from .settings import settings
-from . import llm, citations
+from . import llm, citations, audit, feedback
 from .retriever import retrieve_scored, render_sources
 
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "docs" / "AGENT_SYSTEM_PROMPT.md"
@@ -60,6 +60,7 @@ class AgentResult:
     escalated: bool = False          # did we auto-escalate to the deep model?
     confidence: float | None = None       # top rerank score (None when the reranker is off)
     confidence_band: str | None = None    # "low" | "medium" | "high" | None
+    trace: dict = field(default_factory=dict)
 
 
 def _confidence(scored) -> tuple[float | None, str | None]:
@@ -89,14 +90,70 @@ def _flag_low_confidence(question, answer, sources, building_context, band) -> N
         pass
 
 
+def _determinative_facts(question: str, building_context: str, history: list[dict] | None = None) -> tuple[list[str], dict]:
+    """Local clarify gate: ask only facts that change common code paths before retrieval."""
+    combined = " ".join([question, building_context] + [str(x.get("question", "")) + " " + str(x.get("answer", "")) for x in (history or [])]).lower()
+    if any(x in combined for x in ("i don't know", "i do not know", "unknown")):
+        return [], {}
+    qs, chips = [], {}
+    def missing(patterns, label, options):
+        if not any(p in combined for p in patterns):
+            qs.append(label); chips[label] = options
+    code_words = ("exit", "egress", "standpipe", "sprinkler", "fire alarm", "occupant load", "height", "story")
+    if not any(w in question.lower() for w in code_words):
+        return [], {}
+    missing(("group ", "occupancy", "factory", "business", "assembly", "residential", "r-", "f-", "b occupancy"),
+            "What is the occupancy/use group?", ["B", "F-1", "F-2", "R-2", "Mixed-use"])
+    missing(("new", "existing", "alteration", "addition", "change of occupancy", "change of use"),
+            "Is this new construction, an existing building, or an alteration/change of use?", ["New", "Existing", "Alteration", "Change of use"])
+    if any(w in question.lower() for w in ("exit", "egress", "standpipe", "sprinkler", "height", "story")):
+        missing(("sprinklered", "sprinklered", "not sprinklered", "without sprinklers"),
+                "Is the building sprinklered?", ["Sprinklered", "Not sprinklered", "I don't know"])
+    if any(w in question.lower() for w in ("exit", "egress", "standpipe", "height", "story")):
+        missing(("story", "stories", "feet", " ft", "height", "floor level"),
+                "What are the building height/stories (or highest floor elevation)?", ["1–3 stories", "4+ stories", "Over 30 ft", "I don't know"])
+    if any(w in question.lower() for w in ("exit", "egress", "occupant")):
+        missing(("occupant", "people", "persons", " load"),
+                "What is the occupant load for the space?", ["Under 50", "50–499", "500+", "I don't know"])
+    return qs, chips
+
+
+def _trace_base(question: str, building_context: str, scored, model: str | None = None) -> dict:
+    refs = [audit.chunk_ref(s.chunk, score=s.score, source="dense") for s in scored]
+    return {"interpreted_query": {"normalized_question": " ".join(question.split()), "building_context": building_context,
+                                   "facts_used": building_context},
+            "retrieval": {"dense_terms": [question], "bm25_terms": [question] if settings.use_hybrid else [], "candidates": refs},
+            "reranked": {"chunks": refs[:settings.keep_after_rerank]}, "controlling_source": [], "citation_check": [],
+            "generation": {"model": model or settings.generator_model, "thinking": "off", "confidence": None}, "attempts": []}
+
+
 def ask(question: str, *, mode: str = "answer", building_context: str = "",
         active_cycle_block: str = "", deep: bool = False,
-        provider: str | None = None, collection: str | None = None,
-        history: list[dict] | None = None) -> AgentResult:
+        provider: str | None = None, generator_model: str | None = None,
+        collection: str | None = None, history: list[dict] | None = None) -> AgentResult:
+    # Clarify before retrieval when a missing fact changes the governing branch. Retrieve-only is
+    # intentionally exempt because callers use it to inspect passages without asking for a ruling.
+    missing, chips = _determinative_facts(question, building_context, history)
+    if mode == "answer" and missing:
+        trace = {"interpreted_query": {"normalized_question": " ".join(question.split()), "building_context": building_context,
+                                        "facts_used": building_context, "missing_facts": missing},
+                 "retrieval": {"dense_terms": [], "bm25_terms": [], "candidates": []}, "reranked": {"chunks": []},
+                 "controlling_source": [], "citation_check": [],
+                 "generation": {"model": settings.generator_model, "thinking": "off", "confidence": None}, "attempts": []}
+        return AgentResult(mode="answer", answer=None, sources=[], citations_ok=True, unverified=[],
+                           needs_clarification=True, clarifying_questions=missing, chips=chips, trace=trace)
+
     # Follow-up memory: a context-carrying query variant built from the previous question, fused
     # with the literal question (RRF), so "what about existing buildings?" retrieves the topic
     # it refers to. Reranking still scores against the marshal's ORIGINAL wording.
     extra = _history_queries(question, history)
+    active_edition = collection or settings.active_collection
+    try:
+        precedent = feedback.find_precedent(question, active_edition)
+    except Exception:
+        precedent = None
+    if precedent:
+        extra.append(f"{precedent['question']} {precedent['answer']}")
     scored = retrieve_scored(question, collection=collection, extra_queries=extra or None)
     chunks = [s.chunk for s in scored]
 
@@ -108,8 +165,9 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
     # Deep-mode hook: escalate a hard/low-confidence question to the stronger model. We only
     # trust the score signal when the reranker is on (otherwise scores are uniform placeholders).
     top_score = max((s.score for s in scored), default=0.0)
-    auto_deep = settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
-    use_deep = deep or auto_deep
+    deep_allowed = settings.deep_provider.lower() not in {"", "off", "false", "none", "disabled"}
+    auto_deep = deep_allowed and settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
+    use_deep = deep_allowed and (deep or auto_deep)
 
     # Deep mode also does a SECOND retrieval pass with a rewritten query (folding in the building
     # context), then reranks the union — not just a model swap.
@@ -124,8 +182,14 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
     user = _build_user_block(question, building_context, render_sources(chunks),
                              history=history) + _OUTPUT_PROTOCOL
 
-    gen_provider = provider or (settings.deep_provider if use_deep else settings.generation_provider)
-    model = settings.deep_model if use_deep else None
+    # The grounded answer path is oMLX local only. Deep is disabled unless DEEP_PROVIDER is an
+    # explicitly configured cloud provider, and runtime generator switching is by model id.
+    gen_provider = settings.deep_provider if use_deep else "local"
+    model = settings.deep_model if use_deep else settings.assert_allowed_generator(generator_model)
+    trace = _trace_base(question, building_context, scored, model)
+    if precedent:
+        trace["verified_precedent"] = precedent
+    trace["generation"].update({"thinking": "off", "confidence": conf, "confidence_band": band})
     draft = llm.chat(system, user, provider=gen_provider, model=model)
 
     # Did the model ask for clarification instead of answering? Return the questions, not a guess.
@@ -135,22 +199,49 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
                            unverified=[], needs_clarification=True,
                            clarifying_questions=clar.get("questions", []),
                            chips=clar.get("chips", {}) or {}, escalated=use_deep,
-                           confidence=conf, confidence_band=band)
+                           confidence=conf, confidence_band=band, trace=trace)
 
-    # Safety net: verify every cited section actually appears in the retrieved sources.
+    # Safety net: verify every cited section actually appears in the retrieved sources. If grounding
+    # fails (or retrieval is weak), retry locally with a broadened/section-targeted retrieval pass.
     check = citations.validate(draft, chunks) if settings.validate_citations else None
-    answer = citations.annotate(draft, check) if check else draft
     ok = check.ok if check else True
+    retry_reason = (not ok) or (conf is not None and conf < settings.rerank_min_score)
+    attempt = 0
+    while retry_reason and attempt < settings.max_retrieval_retries:
+        attempt += 1
+        terms = [f"{question} {building_context}".strip()]
+        if check and check.unverified:
+            terms.extend(check.unverified)
+        scored = retrieve_scored(question, collection=collection, extra_queries=extra + terms)
+        chunks = [x.chunk for x in scored]
+        conf, band = _confidence(scored)
+        user = _build_user_block(question, building_context, render_sources(chunks), history=history) + _OUTPUT_PROTOCOL
+        draft = llm.chat(system, user, provider=gen_provider, model=model)
+        check = citations.validate(draft, chunks) if settings.validate_citations else None
+        ok = check.ok if check else True
+        retry_reason = (not ok) or (conf is not None and conf < settings.rerank_min_score)
+        trace["attempts"].append({"attempt": attempt, "reason": "citation-fail-or-low-rerank", "queries": terms,
+                                  "citations_ok": ok, "top_rerank_score": conf,
+                                  "unverified": check.unverified if check else []})
+    answer = citations.annotate(draft, check) if check else draft
+    if not ok:
+        answer = "⚠️ **Unverified — could not confirm in the indexed code.**\n\n" + answer
     unverified = check.unverified if check else []
+    trace["reranked"] = {"chunks": [audit.chunk_ref(x.chunk, score=x.score, source="rerank") for x in scored[:settings.keep_after_rerank]]}
+    trace["generation"].update({"thinking": "off", "confidence": conf, "confidence_band": band})
+    trace["controlling_source"] = audit.controlling_sources(chunks, draft)
+    trace["citation_check"] = audit.citation_rows(draft, chunks, check)
+    trace["attempts"].append({"attempt": 0, "reason": "initial", "citations_ok": ok,
+                              "top_rerank_score": conf, "unverified": unverified})
     _flag_low_confidence(question, answer, chunks, building_context, band)
     return AgentResult(mode="answer", answer=answer, sources=chunks, citations_ok=ok,
                        unverified=unverified, escalated=use_deep,
-                       confidence=conf, confidence_band=band)
+                       confidence=conf, confidence_band=band, trace=trace)
 
 
 def ask_stream(question: str, *, building_context: str = "", active_cycle_block: str = "",
-               deep: bool = False, provider: str | None = None, collection: str | None = None,
-               history: list[dict] | None = None):
+               deep: bool = False, provider: str | None = None, generator_model: str | None = None,
+               collection: str | None = None, history: list[dict] | None = None):
     """Streaming twin of ask(): yields event dicts for Server-Sent Events.
 
     Event types (exactly one of clarify/meta terminates the answer, then done):
@@ -165,12 +256,20 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     at the end; otherwise we stream tokens as they arrive.
     """
     extra = _history_queries(question, history)
+    active_edition = collection or settings.active_collection
+    try:
+        precedent = feedback.find_precedent(question, active_edition)
+    except Exception:
+        precedent = None
+    if precedent:
+        extra.append(f"{precedent['question']} {precedent['answer']}")
     scored = retrieve_scored(question, collection=collection, extra_queries=extra or None)
     chunks = [s.chunk for s in scored]
 
     top_score = max((s.score for s in scored), default=0.0)
-    auto_deep = settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
-    use_deep = deep or auto_deep
+    deep_allowed = settings.deep_provider.lower() not in {"", "off", "false", "none", "disabled"}
+    auto_deep = deep_allowed and settings.use_reranker and bool(scored) and top_score < settings.deep_escalate_below
+    use_deep = deep_allowed and (deep or auto_deep)
 
     if use_deep and (rewrite := _deep_rewrite(question, building_context)):
         scored = retrieve_scored(question, collection=collection,
@@ -182,8 +281,8 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     system = _system_prompt(active_cycle_block)
     user = _build_user_block(question, building_context, render_sources(chunks),
                              history=history) + _OUTPUT_PROTOCOL
-    gen_provider = provider or (settings.deep_provider if use_deep else settings.generation_provider)
-    model = settings.deep_model if use_deep else None
+    gen_provider = settings.deep_provider if use_deep else "local"
+    model = settings.deep_model if use_deep else settings.assert_allowed_generator(generator_model)
 
     buffer: list[str] = []
     mode: str | None = None          # undecided -> "answer" | "json"
@@ -239,10 +338,16 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
         suffix = citations.annotate(full, check)[len(full):]   # just the appended warning text
         ok, unverified = check.ok, check.unverified
 
+    trace = _trace_base(question, building_context, scored, model)
+    trace["generation"].update({"thinking": "off", "confidence": conf, "confidence_band": band})
+    trace["controlling_source"] = audit.controlling_sources(chunks, full)
+    trace["citation_check"] = audit.citation_rows(full, chunks, check)
+    trace["attempts"].append({"attempt": 0, "reason": "stream-initial", "citations_ok": ok,
+                              "top_rerank_score": conf, "unverified": unverified})
     _flag_low_confidence(question, full + suffix, chunks, building_context, band)
     yield {"type": "meta", "sources": chunks, "citations_ok": ok, "unverified": unverified,
            "answer_suffix": suffix, "escalated": use_deep,
-           "confidence": conf, "confidence_band": band}
+           "confidence": conf, "confidence_band": band, "trace": trace}
     yield {"type": "done"}
 
 

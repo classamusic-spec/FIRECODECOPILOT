@@ -35,17 +35,17 @@ export default function CycleBanner() {
   const hasReminder = Boolean(status.reminder) && !dismissed;
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Reminder banner — only when the backend reports a pending/overdue cycle. */}
+    <div className="flex flex-wrap items-center gap-2">
+      {/* Reminder banner — compact but persistent when the backend reports a pending/overdue cycle. */}
       {hasReminder && (
         <div
           role="status"
-          className="flex items-start gap-2.5 rounded-xl border border-coral-500/30 bg-coral-500/[0.08] px-3 py-2.5 text-sm text-coral-100 animate-rise"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-coral-500/30 bg-coral-500/[0.08] px-3 py-2 text-[13px] text-coral-100 animate-rise"
         >
-          <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-coral-500/20 text-coral-300">
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-coral-500/20 text-coral-300">
             <InfoIcon className="h-3.5 w-3.5" />
           </span>
-          <p className="flex-1 leading-snug">{status.reminder}</p>
+          <p className="min-w-0 flex-1 leading-snug">{status.reminder}</p>
           <button
             type="button"
             onClick={() => setDismissed(true)}
@@ -59,19 +59,19 @@ export default function CycleBanner() {
 
       {/* Always-available "active editions" disclosure. */}
       {status.active && (
-        <div className="text-xs">
+        <div className="relative text-xs">
           <button
             type="button"
             onClick={() => setShowActive((v) => !v)}
             aria-expanded={showActive}
             title={status.active}
-            className="inline-flex items-center gap-1 rounded text-steel-500 transition-colors hover:text-steel-300"
+            className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-steel-500 transition-colors hover:text-steel-300"
           >
             <InfoIcon className="h-3.5 w-3.5" />
             Adopted editions
           </button>
           {showActive && (
-            <pre className="scroll-thin glass-inset mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap px-3 py-2 font-mono text-[11.5px] leading-relaxed text-steel-300">
+            <pre className="scroll-thin glass-inset absolute left-0 top-full z-30 mt-1.5 max-h-40 min-w-[20rem] overflow-auto whitespace-pre-wrap px-3 py-2 font-mono text-[11.5px] leading-relaxed text-steel-300">
               {status.active}
             </pre>
           )}

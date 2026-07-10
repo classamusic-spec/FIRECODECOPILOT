@@ -1,63 +1,83 @@
-"""Cross-encoder reranker — the single biggest anti-hallucination lever.
+"""Cross-encoder reranking through the single local oMLX endpoint.
 
-Bi-encoder embedding search is fast but optimizes for recall, not precision: it returns
-chunks that are *similar*, not necessarily *relevant*. A cross-encoder reads the (query, chunk)
-pair together and scores true relevance, so we can keep only the few chunks that actually
-answer the question. Pipeline: retrieve ~20 -> rerank -> keep top 5-7.
-
-Runs fully local on Apple Silicon (MPS) or CPU. Default model: bge-reranker-v2-m3.
-Swap RERANKER_MODEL=Qwen/Qwen3-Reranker-4B for a stronger (heavier) option.
+The reranker is kept resident by oMLX. This module only calls /v1/rerank and adapts common
+OpenAI-compatible rerank response shapes into Scored chunks.
 """
 from __future__ import annotations
 from dataclasses import dataclass
 from .settings import settings
 
-_reranker = None
-
-
-def _get_reranker():
-    """Lazy-load so importing this module is cheap and model load happens once."""
-    global _reranker
-    if _reranker is None:
-        # sentence-transformers CrossEncoder is the most portable wrapper on Apple Silicon.
-        # (FlagEmbedding's FlagReranker also works; CrossEncoder avoids some MPS fp16 pitfalls.)
-        from sentence_transformers import CrossEncoder
-        import torch
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        _reranker = CrossEncoder(settings.reranker_model, device=device, max_length=1024)
-    return _reranker
+_ready = False
 
 
 def is_ready() -> bool:
-    """Ready to rerank without a cold load. If the reranker is disabled it's trivially 'ready'."""
-    return (not settings.use_reranker) or _reranker is not None
+    return (not settings.use_reranker) or _ready
 
 
 def warm() -> None:
-    """Force the cross-encoder to load now (first run downloads it)."""
     if settings.use_reranker:
-        _get_reranker()
+        rerank("warm up", [{"text": "automatic sprinkler system", "metadata": {}}], top_k=1)
 
 
 @dataclass
 class Scored:
-    chunk: dict          # {"text": str, "metadata": {...}}
+    chunk: dict
     score: float
 
 
-def rerank(query: str, chunks: list[dict], top_k: int | None = None) -> list[Scored]:
-    """Reorder `chunks` by true relevance to `query`; return the top_k as Scored items.
+def _post_rerank(query: str, docs: list[str], top_n: int) -> dict:
+    import json
+    import urllib.error
+    import urllib.request
 
-    chunks: list of {"text": ..., "metadata": {book, edition, section, page, is_amendment}}
-    """
+    base = settings.local_base_url.rstrip("/")
+    headers = {"Content-Type": "application/json"}
+    if settings.local_api_key:
+        headers["Authorization"] = f"Bearer {settings.local_api_key}"
+    payload = {"model": settings.reranker_model, "query": query, "documents": docs, "top_n": top_n}
+    data = json.dumps(payload).encode("utf-8")
+    last_error: Exception | None = None
+    # oMLX should expose /v1/rerank. Try /rerank relative to LOCAL_BASE_URL, then a base-stripped
+    # variant for runtimes that mount rerank outside /v1.
+    for url in [base + "/rerank", base.removesuffix("/v1") + "/rerank"]:
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                return json.loads(body) if body else {}
+        except Exception as e:
+            last_error = e
+    raise RuntimeError(f"oMLX rerank endpoint failed: {last_error}")
+
+
+def _parse_ranked(resp: dict, chunks: list[dict]) -> list[Scored]:
+    raw = resp.get("results", resp.get("data", resp.get("rankings", [])))
+    out: list[Scored] = []
+    if isinstance(raw, list) and raw:
+        for i, item in enumerate(raw):
+            if isinstance(item, (int, float)):
+                out.append(Scored(chunks[i], float(item)))
+                continue
+            if not isinstance(item, dict):
+                continue
+            idx = int(item.get("index", item.get("document_index", i)))
+            score = float(item.get("relevance_score", item.get("score", item.get("logit", 0.0))))
+            if 0 <= idx < len(chunks):
+                out.append(Scored(chunks[idx], score))
+    if not out and "scores" in resp and isinstance(resp["scores"], list):
+        out = [Scored(c, float(s)) for c, s in zip(chunks, resp["scores"])]
+    return sorted(out, key=lambda x: x.score, reverse=True)
+
+
+def rerank(query: str, chunks: list[dict], top_k: int | None = None) -> list[Scored]:
+    global _ready
     top_k = top_k or settings.keep_after_rerank
     if not chunks:
         return []
     if not settings.use_reranker:
         return [Scored(c, 0.0) for c in chunks[:top_k]]
-
-    model = _get_reranker()
-    pairs = [(query, c["text"]) for c in chunks]
-    scores = model.predict(pairs)  # higher = more relevant
-    ranked = sorted(zip(chunks, scores), key=lambda x: x[1], reverse=True)
-    return [Scored(chunk=c, score=float(s)) for c, s in ranked[:top_k]]
+    docs = [c["text"] for c in chunks]
+    resp = _post_rerank(query, docs, min(len(docs), max(top_k, settings.keep_after_rerank)))
+    ranked = _parse_ranked(resp, chunks)
+    _ready = True
+    return ranked[:top_k] if ranked else [Scored(c, 0.0) for c in chunks[:top_k]]

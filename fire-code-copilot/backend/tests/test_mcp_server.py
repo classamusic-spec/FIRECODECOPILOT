@@ -40,7 +40,7 @@ def test_lookup_threads_all_params_to_agent(monkeypatch):
 
 
 def test_lookup_default_mode_is_retrieve_and_needs_no_llm(monkeypatch):
-    """Default must be the no-LLM path so Hermes works without LM Studio running."""
+    """Default must be the no-LLM path so Hermes works without oMLX running."""
     monkeypatch.setattr(srv, "active_cycle_block", lambda: "")
     import app.agent as agent
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: [])

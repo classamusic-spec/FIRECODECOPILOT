@@ -11,7 +11,8 @@ npm install            # install dependencies (does not commit node_modules)
 npm run dev            # start the Vite dev server on http://localhost:5173
 ```
 
-The dev UI expects the backend running on **http://localhost:8000**:
+The dev UI expects the Fire Code CoPilot backend running on **http://localhost:8001**
+so oMLX can own **http://localhost:8000/v1**:
 
 ```bash
 # from the repo's backend/ directory, in a separate terminal
@@ -29,7 +30,7 @@ The API base URL is read from `VITE_API_BASE` (see `.env.example`):
 ```bash
 cp .env.example .env
 # edit if your backend runs elsewhere
-VITE_API_BASE=http://localhost:8000
+VITE_API_BASE=http://localhost:8001
 ```
 
 The backend has permissive CORS, so the browser calls it directly. A `/api`

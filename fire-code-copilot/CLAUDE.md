@@ -78,8 +78,8 @@ current model names from env — do not hardcode them in source.
 - `docs/ARCHITECTURE.md` — components, data flow, chunking strategy, the amendment-layering
   approach, the code-cycle mechanism.
 - `docs/AGENT_SYSTEM_PROMPT.md` — the fire-marshal agent prompt (use verbatim as the base).
-- `docs/LOCAL_MODELS.md` — running fully local on Apple Silicon (GLM-5.2 via MLX), the
-  reranker, and the citation validator. Read this if `GENERATION_PROVIDER=local`.
+- `docs/LOCAL_MODELS.md` — the oMLX single-endpoint local runtime: two switchable generators,
+  BGE-M3 embeddings, reranker, OCR, thinking-off answers, and the citation validator.
 - `docs/BUILD_PLAN.md` — the phased, ordered build steps. **Execute in order.**
 - `docs/COPYRIGHT_AND_LICENSING.md` — the legal guardrails + the future monetization split.
 - `config/code_cycles.example.yaml` — adopted editions + effective dates (user finalizes).

@@ -125,7 +125,8 @@ The wrapper reads these at launch:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `FCC_API_PORT` | `8000` | Backend port. Must match the UI's `VITE_API_BASE`. |
+| `FCC_API_PORT` | `8001` | Backend port. Must match the UI's `VITE_API_BASE`; leaves oMLX on `8000`. |
+| `FCC_STOP_OMLX_ON_EXIT` | `1` | Stop managed oMLX and release model memory when the desktop app quits. Set `0` only if another workload owns oMLX. |
 | `FCC_CODE_BOOKS_DIR` | `<app-data>/code_books` | Where the **standalone** app reads your PDFs. |
 | `FCC_NO_BACKEND` | unset | Don't spawn a backend — use this when you already run one yourself. |
 | `FCC_ROOT` | auto-detected | **Dev fallback only:** pin the repo root (folder containing `backend/`). |
@@ -137,11 +138,11 @@ The wrapper reads these at launch:
 ```
 ┌──────────────────────── Fire Code CoPilot.app (standalone) ─────────────────────────┐
 │  Native window (OS webview)                                                          │
-│   └─ loads the built React UI  ── talks to ──▶  http://127.0.0.1:8000 (API)          │
+│   └─ loads the built React UI  ── talks to ──▶  http://127.0.0.1:8001 (API)          │
 │                                                        ▲                              │
 │  Rust setup hook ─ spawns ─▶  <Resources>/fcc-backend/fcc-backend  (frozen Python)   │
 │                     with DATA_DIR / CHROMA_DIR / CODE_BOOKS_DIR ─▶  ~/Library/…       │
-│  Rust exit hook  ─ kills  ─▶  (same child process)                                    │
+│  Rust exit hook  ─ kills backend + runs `omlx stop` ─▶ releases local model memory    │
 └──────────────────────────────────────────────────────────────────────────────────────┘
         (dev fallback: spawns backend/.venv/bin/uvicorn from the repo instead)
 ```

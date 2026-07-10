@@ -12,7 +12,7 @@ python-dotenv
 # To run an open-source model DIRECTLY (a .gguf via llama.cpp, or MLX on Apple Silicon),
 # see requirements-local-llm.txt — those deps are optional and intentionally kept out of here.
 anthropic              # Claude API (optional escalation only)
-openai                 # talk to local OpenAI-compatible servers (LM Studio / mlx_lm.server / Ollama)
+openai                 # talk to the local OpenAI-compatible oMLX endpoint
 voyageai               # Voyage embeddings (optional; local is default)
 sentence-transformers  # local embeddings (BGE-M3) + local reranker (CrossEncoder)
 

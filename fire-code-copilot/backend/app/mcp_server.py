@@ -12,9 +12,9 @@ Tools:
 Two modes, and which one your outer agent should use matters:
   - mode="retrieve" (RECOMMENDED for an outer agent like Hermes): returns the grounded,
     amendment-layered source passages and lets YOUR model reason over them. Needs no local
-    LLM — works even when LM Studio isn't running.
+    LLM — works even when oMLX isn't running.
   - mode="answer": this app's own configured model composes a citation-validated answer.
-    Requires the configured generation backend (e.g. LM Studio) to be up.
+    Requires the configured oMLX generation backend to be up.
 
 Containment note: the passages returned here are excerpts from the marshal's licensed books.
 Whatever model the CALLING agent uses (e.g. a cloud model) will see them — the same envelope

@@ -8,7 +8,7 @@ No prompts and no code books leave your Mac.
 ## The all-local data flow
 
 ```
-You ──▶ Hermes Agent (local model: GLM-5.2 or fast Qwen3.6)
+You ──▶ Hermes Agent
             │  recognizes a fire-code question
             ▼
      fire_code_lookup tool  ─────────────┐
@@ -16,7 +16,7 @@ You ──▶ Hermes Agent (local model: GLM-5.2 or fast Qwen3.6)
             ▼                            │
    Fire Code CoPilot backend            │
      embed (local) → Chroma → rerank    │
-     → GLM-5.2 (local) drafts answer    │
+     → oMLX generator drafts answer     │
      → citation validator               │
             │                            │
             ▼                            │
@@ -26,23 +26,22 @@ You ──▶ Hermes Agent (local model: GLM-5.2 or fast Qwen3.6)
         Hermes relays it to you (Telegram/CLI/etc.)
 ```
 
-Two local models are in play and that's fine:
-- **Hermes orchestrator model** — decides when to call the tool. A fast model (e.g. Qwen3.6)
-  is plenty here, since the hard reasoning happens inside the tool.
-- **Fire Code answering model** — GLM-5.2 inside the tool, where citation accuracy matters.
-- Or use GLM-5.2 for both. Your 512GB can hold it.
+Two model roles are in play and that's fine:
+- **Hermes orchestrator model** — decides when to call the tool.
+- **Fire Code answering model** — one of the two resident oMLX generators selected by the app.
+  The answer path has thinking off and relies on retrieved, validated citations.
 
 ## Step 0 — get Hermes talking to a local model first
 
 Nous' own advice: don't add tools/skills until one clean local chat + one successful tool
-call work. Point Hermes at your local OpenAI-compatible server (LM Studio `:1234`, Ollama
-`:11434`, or `mlx_lm.server`). In `~/.hermes/config.yaml`:
+call work. Point Hermes at your preferred orchestrator model; Fire Code CoPilot itself uses the
+oMLX endpoint configured by `.env`.
 
 ```yaml
 provider: custom
 model:
-  default: glm-5.2          # or a fast model like qwen3.6 for orchestration
-  base_url: http://localhost:1234/v1
+  default: your-orchestrator-model
+  base_url: http://localhost:8000/v1
   context_length: 131072
 ```
 
@@ -53,7 +52,7 @@ between Hermes versions — confirm against hermes-agent.nousresearch.com/docs.)
 ## Wiring option 1 — MCP server (recommended, most portable)
 
 Fire Code CoPilot ships an MCP server (`backend/app/mcp_server.py`) exposing `fire_code_lookup`
-and `fire_code_cycle_status`. MCP is reusable across agents (Hermes, Claude, LM Studio…), so
+and `fire_code_cycle_status`. MCP is reusable across agents (Hermes, Claude, local UIs…), so
 you build the tool once.
 
 1. Start the backend services (local model server + Chroma already running):

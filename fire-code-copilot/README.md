@@ -159,22 +159,23 @@ and with a local model *nothing* leaves at all.)
    ```
    Save and close.
 
-### 🔒 Fully private — run the model locally on your Mac Studio
-Your Mac Studio is powerful enough to run a good model with **zero cloud**. Easiest local option:
-1. Install **Ollama**: `brew install ollama` then `ollama serve` (leave it running), and in
-   another Terminal: `ollama pull qwen2.5:7b-instruct`.
-2. `open -e .env` and set:
+### 🔒 Fully private — run the oMLX stack locally on your Mac Studio
+Your Mac Studio is powerful enough to run the whole stack with **zero cloud**. Fire Code CoPilot
+expects one OpenAI-compatible **oMLX** endpoint for generation, embeddings, reranking, and OCR.
+`open -e .env` and set:
    ```
    GENERATION_PROVIDER=local
-   LOCAL_BASE_URL=http://localhost:11434/v1
-   LOCAL_MODEL=qwen2.5:7b-instruct
+   LOCAL_BASE_URL=http://localhost:8000/v1
+   GENERATOR_MODEL=granite-4.0-h-small-MLX-8bit
+   GENERATOR_MODELS=granite-4.0-h-small-MLX-8bit,gemma-4-26b-a4b-it-4bit,Ornith-1.0-35B-bf16
+   MLX_THINKING=off
    ```
-   (Prefer a downloaded **.gguf** file or an **MLX** model instead? See `docs/LOCAL_MODELS.md` —
-   set `GENERATION_PROVIDER=llamacpp` or `mlx`. Run `python -m app.llm --check` to confirm it's
-   wired up.)
+See `docs/LOCAL_MODELS.md` for the full single-endpoint setup. Run
+`python -m app.llm --model-check` to confirm oMLX has both generators plus BGE-M3 embeddings and
+the reranker reachable with thinking disabled.
 
-> The **embeddings** model (which finds the right sections) runs locally by default and downloads
-> automatically the first time (~2 GB). Just let it finish on the first run.
+> The **embeddings** and **reranker** also run through the same oMLX endpoint. Keep oMLX running
+> before indexing or asking answer-mode questions.
 
 ---
 
@@ -210,7 +211,7 @@ You need **two** things running. Open **two Terminal windows** (or two tabs: `�
 ```bash
 cd ~/FIRECODECOPILOT/fire-code-copilot/backend
 source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8001
 ```
 Leave it running (it'll say "Application startup complete").
 

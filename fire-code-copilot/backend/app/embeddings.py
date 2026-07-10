@@ -1,24 +1,19 @@
-"""Provider-agnostic embeddings. Local-first (nothing leaves the machine) by default.
+"""Embeddings via the single local oMLX OpenAI-compatible endpoint.
 
-Two quality/perf refinements over a bare `model.encode`:
-  * **Role prefixes.** Asymmetric-search embedders (e.g. BGE v1.5) want a short instruction on the
-    *query* side only. `EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` apply by `input_type`;
-    both default to "" so the behavior is unchanged unless you opt in.
-  * **On-disk cache.** Identical text is embedded once and reused (see `embed_cache`), so a
-    re-ingest or a repeated query is a lookup, not a model run. Toggle with `CACHE_EMBEDDINGS`.
+The app no longer loads sentence-transformers in-process. All vectorization goes through
+LOCAL_BASE_URL (/v1/embeddings) using EMBEDDING_MODEL, so generator switching, embeddings,
+and reranking are managed by one resident oMLX process.
 """
 from __future__ import annotations
-
+import math
 from .settings import settings
 
-_local_model = None
+_ready = False
+_local_model = None  # legacy test hook; runtime does not load an in-process model
 
 
 def _namespace(input_type: str) -> str:
-    """Cache namespace: the active model id + the query/passage role. Changing either invalidates
-    old entries automatically (they hash to different keys)."""
-    model = settings.voyage_model if settings.embedding_provider == "voyage" else settings.local_embedding_model
-    return f"{model}|{input_type}"
+    return f"{settings.embedding_model}|{input_type}"
 
 
 def _prefix_for(input_type: str) -> str:
@@ -34,7 +29,6 @@ def embed(texts: list[str], *, input_type: str = "document") -> list[list[float]
     if not settings.cache_embeddings:
         return _embed_raw(prepared, input_type)
 
-    # Serve what we can from the cache; compute + store only the misses.
     from . import embed_cache
     ns = _namespace(input_type)
     vectors = embed_cache.get_many(prepared, ns)
@@ -48,34 +42,36 @@ def embed(texts: list[str], *, input_type: str = "document") -> list[list[float]
 
 
 def _embed_raw(texts: list[str], input_type: str) -> list[list[float]]:
-    if settings.embedding_provider == "voyage":
-        return _embed_voyage(texts, input_type)
+    if settings.embedding_provider != "local":
+        raise ValueError("Only EMBEDDING_PROVIDER=local is supported in the oMLX single-endpoint stack")
     return _embed_local(texts)
 
 
+def _normalize(vec: list[float]) -> list[float]:
+    norm = math.sqrt(sum(float(x) * float(x) for x in vec)) or 1.0
+    return [float(x) / norm for x in vec]
+
+
+def _embed_omlx(texts: list[str]) -> list[list[float]]:
+    global _ready
+    from openai import OpenAI
+    client = OpenAI(base_url=settings.local_base_url, api_key=settings.local_api_key or "not-needed")
+    resp = client.embeddings.create(model=settings.embedding_model, input=texts, encoding_format="float")
+    # Preserve request order; OpenAI-compatible servers return an index per item.
+    data = sorted(resp.data, key=lambda item: item.index)
+    _ready = True
+    return [_normalize(list(item.embedding)) for item in data]
+
+
 def _embed_local(texts: list[str]) -> list[list[float]]:
-    global _local_model
-    if _local_model is None:
-        from sentence_transformers import SentenceTransformer
-        import torch
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        _local_model = SentenceTransformer(settings.local_embedding_model, device=device)
-    return _local_model.encode(texts, normalize_embeddings=True).tolist()
-
-
-def _embed_voyage(texts: list[str], input_type: str) -> list[list[float]]:
-    import voyageai
-    vo = voyageai.Client(api_key=settings.voyage_api_key)
-    return vo.embed(texts, model=settings.voyage_model, input_type=input_type).embeddings
+    """Legacy hook name used by tests; production implementation calls oMLX."""
+    return _embed_omlx(texts)
 
 
 def is_ready() -> bool:
-    """Whether the embedder is ready to use without a cold load. Voyage (a hosted API) is always
-    'ready'; the local model must have been loaded (the first embed downloads it)."""
-    return settings.embedding_provider != "local" or _local_model is not None
+    return _ready
 
 
 def warm() -> None:
-    """Force the local embedding model to load now (so the first real query isn't a silent hang)."""
     if settings.embedding_provider == "local":
-        _embed_local(["warm up"])
+        _embed_local(["warm up fire code retrieval"])

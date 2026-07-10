@@ -16,7 +16,8 @@ class AskRequest(BaseModel):
     mode: str = "answer"            # "answer" | "retrieve"
     building_context: str = ""      # occupancy, new/existing, type, height, area, sprinklered...
     deep: bool = False              # escalate to DEEP_PROVIDER/DEEP_MODEL for hard questions
-    provider: str | None = None     # override generation backend: "local" | "anthropic"
+    provider: str | None = None     # legacy override; answer path is oMLX local by default
+    generator_model: str | None = None  # runtime switch among GENERATOR_MODELS
     collection: str | None = None   # query a specific edition/cycle collection (default: active)
     history: list[Exchange] = []    # prior exchanges in this conversation (follow-up memory)
 
@@ -29,12 +30,15 @@ class ClarifyRequest(BaseModel):
     building_context: str = ""      # any context already gathered earlier in the thread
     deep: bool = False
     provider: str | None = None
+    generator_model: str | None = None
     collection: str | None = None
     history: list[Exchange] = []    # prior exchanges in this conversation (follow-up memory)
 
 
 class IngestRequest(BaseModel):
     force: bool = False
+    use_ocr: bool | None = None
+    version_suffix: str | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -52,3 +56,12 @@ class VerifyRequest(BaseModel):
     corrected_answer: str
     governing_sections: list[str] = []
     edition: str = ""
+
+
+class ModelSelectRequest(BaseModel):
+    model: str
+
+
+class RuntimeLoadRequest(BaseModel):
+    """An explicit user request to load one curated local generator into oMLX."""
+    model: str

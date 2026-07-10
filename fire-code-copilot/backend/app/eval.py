@@ -265,6 +265,28 @@ def run_judged(provider: str | None = None, pass_score: float = 0.7) -> dict:
     }
 
 
+def run_jsonl(path: str | None = None, *, generator_model: str | None = None) -> dict:
+    """On-demand live golden runner for candidate-index cutover / generator A-B comparisons."""
+    from . import agent
+    target = Path(path) if path else Path(__file__).resolve().parents[1] / "eval" / "golden_eval.jsonl"
+    cases = [json.loads(line) for line in target.read_text().splitlines() if line.strip()]
+    results = []
+    for case in cases:
+        res = agent.ask(case["question"], generator_model=generator_model)
+        cited = {canonical(x.get("section", "")) for x in (res.trace.get("citation_check", []) if res.trace else []) if x.get("verified")}
+        wanted = {canonical(x) for x in case.get("expected_sections", [])}
+        text = (res.answer or "").lower()
+        value_ok = not case.get("expected_value") or str(case["expected_value"]).lower() in text
+        results.append({"question": case["question"], "citation_ok": wanted <= cited, "value_ok": value_ok,
+                        "expected_sections": list(wanted), "cited_sections": list(cited), "answer": res.answer or ""})
+    total = len(results) or 1
+    citation_accuracy = sum(r["citation_ok"] for r in results) / total
+    value_accuracy = sum(r["value_ok"] for r in results) / total
+    return {"total": len(results), "recall_at_k": citation_accuracy, "citation_accuracy": citation_accuracy,
+            "value_accuracy": value_accuracy, "gate_pass": citation_accuracy >= .9 and value_accuracy >= .9,
+            "generator_model": generator_model or settings.generator_model, "results": results}
+
+
 def _print(report: dict) -> None:
     print(f"Eval corpus: {report['corpus_chunks']} chunks  |  golden cases: {report['total']}")
     for r in report["results"]:
@@ -296,6 +318,10 @@ def _print_judged(report: dict) -> None:
 
 
 if __name__ == "__main__":
+    if "--jsonl" in sys.argv:
+        report = run_jsonl(generator_model=(sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else None))
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if report["gate_pass"] else 1)
     if "--judge" in sys.argv:
         # Generate + LLM-judge each golden answer (needs a model). Deterministic retrieval eval still runs.
         _print_judged(run_judged())

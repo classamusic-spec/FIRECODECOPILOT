@@ -3,25 +3,41 @@
 @tailwind utilities;
 
 /* ---------------------------------------------------------------------------
-   Premium navy-cockpit base. The app sits on a deep navy canvas with a soft
-   coral glow (top) and a faint engineering grid — futuristic but calm.
+   Hyper-polished glass cockpit. Dark-brass / fire-coral control-plane styling:
+   frosted panes, subtle noise, deep radial glows, and calm AHJ-focused typography.
 --------------------------------------------------------------------------- */
 @layer base {
   html { scroll-behavior: smooth; }
 
   body {
     @apply text-steel-200 antialiased;
-    background-color: #05090f;
-    /* layered: a coral glow up top, a cool navy depth glow, then a fine grid */
+    margin: 0;
+    background-color: #03060b;
     background-image:
-      radial-gradient(900px 520px at 78% -8%, rgba(255, 92, 66, 0.16), transparent 60%),
-      radial-gradient(820px 600px at 8% 6%, rgba(30, 62, 99, 0.45), transparent 62%),
-      linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+      radial-gradient(900px 560px at 82% -12%, rgba(255, 92, 66, 0.18), transparent 60%),
+      radial-gradient(760px 520px at 12% 10%, rgba(93, 173, 226, 0.16), transparent 62%),
+      radial-gradient(860px 600px at 45% 110%, rgba(201, 167, 108, 0.12), transparent 58%),
+      linear-gradient(rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 34px 34px, 34px 34px;
     background-attachment: fixed;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.035), transparent 32%, rgba(255,255,255,.018) 62%, transparent),
+      repeating-radial-gradient(circle at 20% 20%, rgba(255,255,255,.035) 0 1px, transparent 1px 5px);
+    opacity: .25;
+    mix-blend-mode: screen;
+  }
+
+  #root { position: relative; z-index: 1; }
 
   :focus-visible {
     @apply outline-none ring-2 ring-coral-500/70 ring-offset-2;
@@ -32,20 +48,51 @@
   .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
   .scroll-thin::-webkit-scrollbar-thumb { @apply rounded-full; background: rgba(167, 180, 204, 0.22); }
   .scroll-thin::-webkit-scrollbar-thumb:hover { background: rgba(167, 180, 204, 0.38); }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
 @layer components {
-  /* Frosted-glass panel: the core surface language of the app. */
-  .glass {
-    @apply rounded-2xl border border-white/10 bg-white/[0.045] backdrop-blur-xl;
-    box-shadow: 0 16px 50px -20px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
-  }
-  .glass-inset {
-    @apply rounded-xl border border-white/[0.07];
-    background: rgba(5, 9, 15, 0.55);
+  .app-shell {
+    background:
+      linear-gradient(180deg, rgba(3,6,11,.55), rgba(3,6,11,.86)),
+      radial-gradient(1200px 600px at 55% -10%, rgba(255,255,255,.055), transparent 58%);
   }
 
-  /* Markdown answer typography, tuned for light text on the dark glass card. */
+  .glass {
+    @apply relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] backdrop-blur-2xl;
+    box-shadow:
+      0 24px 80px -34px rgba(0, 0, 0, 0.85),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+      inset 0 -1px 0 rgba(255,255,255,.025);
+  }
+
+  .glass::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(255,255,255,.08), transparent 38%, rgba(255,255,255,.025));
+    opacity: .45;
+  }
+
+  .glass > * { position: relative; z-index: 1; }
+
+  .glass-inset {
+    @apply rounded-xl border border-white/[0.07];
+    background: linear-gradient(180deg, rgba(5, 9, 15, 0.72), rgba(5, 9, 15, 0.46));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.045);
+  }
+
   .answer-prose { @apply text-[15px] leading-relaxed text-steel-100; }
   .answer-prose > * + * { @apply mt-3; }
   .answer-prose h1, .answer-prose h2, .answer-prose h3 { @apply font-semibold tracking-tight text-white; }

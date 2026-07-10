@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
 from .settings import settings
-from .models import (AskRequest, ClarifyRequest, IngestRequest, FeedbackRequest, VerifyRequest)
+from .models import (AskRequest, ClarifyRequest, IngestRequest, FeedbackRequest, VerifyRequest, ModelSelectRequest, RuntimeLoadRequest)
 from .agent import ask as agent_ask, ask_stream as agent_ask_stream, result_dict
 from .cycles import active_cycle_block, cycle_reminder
 from . import feedback as fb
@@ -25,8 +25,89 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def health():
     from .warm import status
     return {"ok": True, "jurisdiction": settings.jurisdiction,
-            "generation_provider": settings.generation_provider, "model": settings.local_model,
-            "ready": status()}
+            "generation_provider": settings.generation_provider,
+            "model": settings.generator_model, "generator_model": settings.generator_model,
+            "generator_models": settings.generator_model_list,
+            "local_base_url": settings.local_base_url, "mlx_thinking": settings.mlx_thinking,
+            "deep_provider": settings.deep_provider, "ready": status()}
+
+
+@app.get("/models")
+def models():
+    # Never expose embedder/reranker/OCR ids as chat choices; only configured eligible generators.
+    try:
+        from .runtime_models import available_omlx_models
+        pinned = available_omlx_models()
+    except Exception:
+        pinned = set()
+    return {
+        "provider": "local",
+        "local_base_url": settings.local_base_url,
+        "active_generator": settings.generator_model,
+        "generator_models": [m for m in settings.generator_model_list if not pinned or m in pinned],
+        "embedding_model": settings.embedding_model,
+        "reranker_model": settings.reranker_model,
+        "reranker_enabled": settings.use_reranker,
+        "thinking": settings.mlx_thinking,
+        "deep_provider": settings.deep_provider,
+    }
+
+
+@app.post("/models/select")
+def select_model(req: ModelSelectRequest):
+    try:
+        from .runtime_models import select
+        return select(req.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not validate the oMLX generator: {exc}")
+
+
+@app.get("/runtime")
+def runtime_status():
+    """Read-only local oMLX status. This never starts the server or loads a model."""
+    from . import runtime_control
+    return runtime_control.status()
+
+
+@app.post("/runtime/start")
+def runtime_start():
+    """Start the managed local oMLX service; model loading remains an explicit next action."""
+    try:
+        from . import runtime_control
+        return runtime_control.start()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/runtime/load")
+def runtime_load(req: RuntimeLoadRequest):
+    """Explicitly warm exactly one curated generator and make it active for new questions."""
+    try:
+        from . import runtime_control
+        return runtime_control.load(req.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/runtime/stop")
+def runtime_stop():
+    """Stop managed oMLX and release all model memory."""
+    try:
+        from . import runtime_control
+        return runtime_control.stop()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/model-check")
+def model_check():
+    from .llm import model_check as run_model_check
+    lines = run_model_check()
+    return {"ok": lines[-1].endswith("PASS") if lines else False, "lines": lines}
 
 
 @app.post("/warm")
@@ -65,7 +146,7 @@ def ask(req: AskRequest):
     return _http_errors(lambda: result_dict(agent_ask(
         req.question, mode=req.mode, building_context=req.building_context,
         active_cycle_block=active_cycle_block(), deep=req.deep, provider=req.provider,
-        collection=req.collection, history=_hist(req))))
+        generator_model=req.generator_model, collection=req.collection, history=_hist(req))))
 
 
 @app.post("/ask/stream")
@@ -87,7 +168,8 @@ def ask_stream(req: AskRequest):
             for event in agent_ask_stream(
                 req.question, building_context=req.building_context,
                 active_cycle_block=active_cycle_block(), deep=req.deep,
-                provider=req.provider, collection=req.collection, history=_hist(req)):
+                provider=req.provider, generator_model=req.generator_model,
+                collection=req.collection, history=_hist(req)):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:  # never leave the stream hanging on an unexpected error
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
@@ -104,13 +186,20 @@ def clarify(req: ClarifyRequest):
     ctx = "\n".join(c for c in (req.building_context, req.answers) if c.strip())
     return _http_errors(lambda: result_dict(agent_ask(
         req.question, building_context=ctx, active_cycle_block=active_cycle_block(),
-        deep=req.deep, provider=req.provider, collection=req.collection, history=_hist(req))))
+        deep=req.deep, provider=req.provider, generator_model=req.generator_model,
+        collection=req.collection, history=_hist(req))))
 
 
 @app.post("/ingest")
 def ingest(req: IngestRequest):
     from .ingest import ingest as run_ingest
-    return run_ingest(force=req.force)
+    previous = settings.use_ocr
+    if req.use_ocr is not None:
+        settings.use_ocr = req.use_ocr
+    try:
+        return run_ingest(force=req.force, version_suffix=req.version_suffix)
+    finally:
+        settings.use_ocr = previous
 
 
 @app.post("/ingest/stream")
@@ -125,14 +214,19 @@ def ingest_stream(req: IngestRequest):
     q: queue.Queue = queue.Queue()
 
     def worker():
+        previous = settings.use_ocr
+        if req.use_ocr is not None:
+            settings.use_ocr = req.use_ocr
         try:
-            result = run_ingest(force=req.force, on_event=q.put)
+            result = run_ingest(force=req.force, on_event=q.put, version_suffix=req.version_suffix)
             if "error" in result:
                 q.put({"type": "error", "message": result["error"]})
                 q.put({"type": "done", "summary": result})
         except Exception as e:
             q.put({"type": "error", "message": str(e)})
             q.put({"type": "done", "summary": {}})
+        finally:
+            settings.use_ocr = previous
         q.put(None)  # sentinel: stream over
 
     threading.Thread(target=worker, daemon=True).start()
@@ -169,21 +263,26 @@ def page_image(source: str, page: int):
 
     Copyright containment: this serves a single page to the LOCAL UI on request — the same
     footprint as showing the extracted chunk text. Nothing is stored, exported, or listed;
-    `source` must be a bare filename inside the code-books folder (no path traversal).
+    `source` must be a .pdf path relative to the code-books folder (no path traversal).
     """
     import os
     from pathlib import Path
-    name = Path(source).name
-    if name != source or not name.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="source must be a bare .pdf filename")
-    pdf = Path(os.path.expanduser(settings.code_books_dir)) / name
+    root = Path(os.path.expanduser(settings.code_books_dir)).resolve()
+    rel = Path(source)
+    if rel.is_absolute() or ".." in rel.parts or not source.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="source must be a relative .pdf path")
+    pdf = (root / rel).resolve()
+    try:
+        pdf.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="source must stay inside your code-books folder")
     if not pdf.is_file():
-        raise HTTPException(status_code=404, detail=f"{name} is not in your code-books folder")
+        raise HTTPException(status_code=404, detail=f"{source} is not in your code-books folder")
     import fitz
     doc = fitz.open(pdf)
     try:
         if not (1 <= page <= len(doc)):
-            raise HTTPException(status_code=404, detail=f"{name} has no page {page}")
+            raise HTTPException(status_code=404, detail=f"{source} has no page {page}")
         png = doc[page - 1].get_pixmap(dpi=120).tobytes("png")
     finally:
         doc.close()

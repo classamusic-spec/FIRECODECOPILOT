@@ -82,6 +82,15 @@ def restore(zip_path: str, replace_feedback: bool = False) -> dict:
     with zipfile.ZipFile(src) as z:
         names = set(z.namelist())
 
+        # Restore feedback before re-promoting verified answers; promotion itself creates the
+        # SQLite store, which must not make a genuinely fresh install look "existing".
+        fb_db = Path(settings.feedback_db)
+        if _FEEDBACK_DB in names and (replace_feedback or not fb_db.is_file()):
+            fb_db.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(_FEEDBACK_DB) as f, open(fb_db, "wb") as out:
+                shutil.copyfileobj(f, out)
+            summary["feedback_db"] = "restored"
+
         if _VERIFIED_JSON in names:
             entries = json.loads(z.read(_VERIFIED_JSON).decode("utf-8"))
             for e in entries:
@@ -93,13 +102,6 @@ def restore(zip_path: str, replace_feedback: bool = False) -> dict:
                                           governing_sections=e.get("sections") or [],
                                           edition=e.get("edition") or "")
                 summary["verified_restored"] += 1
-
-        fb_db = Path(settings.feedback_db)
-        if _FEEDBACK_DB in names and (replace_feedback or not fb_db.is_file()):
-            fb_db.parent.mkdir(parents=True, exist_ok=True)
-            with z.open(_FEEDBACK_DB) as f, open(fb_db, "wb") as out:
-                shutil.copyfileobj(f, out)
-            summary["feedback_db"] = "restored"
 
         for name, target, key in (
             (_BOOKS_YAML, Path(settings.code_books_dir).expanduser() / _BOOKS_YAML, "books_manifest"),

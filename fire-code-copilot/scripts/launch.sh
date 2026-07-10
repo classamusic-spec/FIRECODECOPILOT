@@ -4,7 +4,7 @@
 #   bash scripts/launch.sh
 #
 # First run: creates the Python venv, installs backend + frontend deps, and copies .env.
-# Every run: warms the local models, starts the API (:8000) and the web UI (:5173), and opens
+# Every run: warms the retrieval stack, starts the app API (:8001) and web UI (:5173), and opens
 # your browser. Press Control-C once to stop both. Nothing leaves your machine.
 set -euo pipefail
 
@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 PY=backend/.venv/bin/python
-API_PORT="${API_PORT:-8000}"
+API_PORT="${API_PORT:-8001}"
 WEB_PORT="${WEB_PORT:-5173}"
 
 # --- First-run setup (idempotent) -------------------------------------------------------------
@@ -51,7 +51,7 @@ PIDS+=($!)
 ) &
 
 echo "→ Starting the web UI on :$WEB_PORT …"
-( cd frontend && npm run dev -- --port "$WEB_PORT" ) &
+( cd frontend && VITE_API_BASE="http://localhost:$API_PORT" npm run dev -- --port "$WEB_PORT" ) &
 PIDS+=($!)
 
 # Open the browser once the UI is reachable.

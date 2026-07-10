@@ -15,7 +15,7 @@
 import { useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Turn } from "../lib/types";
-import type { ConfidenceBand } from "../lib/api";
+import type { ConfidenceBand, AnswerTrace } from "../lib/api";
 import SourceCitation from "./SourceCitation";
 import FeedbackBar from "./FeedbackBar";
 import ClarifyingChips from "./ClarifyingChips";
@@ -65,6 +65,23 @@ function ConfidenceChip({ band }: { band: ConfidenceBand }) {
       Confidence: {s.label}
     </span>
   );
+}
+
+function HowFound({ trace, onCite }: { trace: AnswerTrace; onCite: (section: string) => void }) {
+  const candidates = trace.retrieval?.candidates ?? [];
+  const reranked = trace.reranked?.chunks ?? [];
+  return <details className="mt-4 rounded-xl border border-white/10 bg-black/10 px-3 py-2 text-xs text-steel-300">
+    <summary className="cursor-pointer font-semibold text-steel-100">Show how this was found</summary>
+    <p className="mt-2 text-steel-400">Per the Connecticut State Fire Safety Code as adopted and amended by the City of Hartford.</p>
+    <div className="mt-3 space-y-3">
+      <section><b>Interpreted query</b><pre className="mt-1 whitespace-pre-wrap text-[11px] text-steel-400">{JSON.stringify(trace.interpreted_query, null, 2)}</pre></section>
+      <section><b>Retrieval candidates</b><p className="mt-1 text-steel-400">dense: {(trace.retrieval?.dense_terms ?? []).join(" · ")} {trace.retrieval?.bm25_terms?.length ? ` / BM25: ${trace.retrieval.bm25_terms.join(" · ")}` : ""}</p>{candidates.map((c, i) => <button key={i} onClick={() => onCite(String(c.section ?? ""))} className="mt-1 block text-left text-coral-300 hover:underline">§{String(c.section ?? "?")} · {String(c.book ?? "")} p.{String(c.page ?? "?")} · {String(c.source ?? "dense")} · {String(c.score ?? "")}</button>)}</section>
+      <section><b>Reranked chunks used</b>{reranked.map((c, i) => <button key={i} onClick={() => onCite(String(c.section ?? ""))} className="mt-1 block text-left text-coral-300 hover:underline">§{String(c.section ?? "?")} · score {String(c.score ?? "")}</button>)}</section>
+      <section><b>Controlling source</b>{(trace.controlling_source ?? []).map((c, i) => <p key={i} className="mt-1">§{String(c.section ?? "?")} · {String(c.book ?? "")} p.{String(c.page ?? "?")} {c.ct_amendment_controls ? "· CT amendment controls" : ""}</p>)}</section>
+      <section><b>Citation check</b>{(trace.citation_check ?? []).map((c, i) => <button key={i} onClick={() => onCite(c.section)} className="mt-1 mr-2 text-left text-coral-300 hover:underline">§{c.section}: {c.verified ? "verified" : "unverified"}</button>)}</section>
+      <section><b>Generation</b><p className="mt-1">{trace.generation?.model ?? "local"} · thinking: {trace.generation?.thinking ?? "off"} · confidence: {String(trace.generation?.confidence ?? "n/a")}</p></section>
+    </div>
+  </details>;
 }
 
 /** Three-dot pulse used while an answer is generating. */
@@ -187,6 +204,7 @@ export default function ChatMessage({ turn, onClarify }: Props) {
                 {/* Model-vs-CT amendment diff — surfaced above the flat Sources
                     list; returns null (renders nothing) when there are no pairs. */}
                 <AmendmentDiff sources={response.sources} />
+                {response.trace && <HowFound trace={response.trace} onCite={onCite} />}
 
                 {response.sources.length > 0 && (
                   <div className="mt-4">

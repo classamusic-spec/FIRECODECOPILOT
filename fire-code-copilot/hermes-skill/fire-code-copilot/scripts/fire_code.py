@@ -8,7 +8,7 @@ Usage:
 """
 import argparse, json, sys, urllib.request
 
-DEFAULT_URL = "http://localhost:8000/ask"   # FastAPI backend (see backend/app/main.py)
+DEFAULT_URL = "http://localhost:8001/ask"   # FastAPI backend (see backend/app/main.py)
 
 
 def main() -> int:

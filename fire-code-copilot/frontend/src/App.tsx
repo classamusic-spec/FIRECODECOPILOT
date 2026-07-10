@@ -5,7 +5,7 @@
  *   - Header: brand mark + jurisdiction/provider (from GET /health) + CycleBanner.
  *   - Message log: alternating user questions and assistant answers, scrollable.
  *   - Composer dock: textarea (Enter sends, Shift+Enter newline), coral send button,
- *     a provider toggle (Local | Anthropic), a "Deep" toggle, and a collapsible
+ *     a runtime oMLX generator switcher, thinking-off/deep-off badges, and a collapsible
  *     building-context field.
  *
  * Flow: send -> push a user turn + a loading assistant turn -> POST /ask -> fill it in.
@@ -13,7 +13,7 @@
  * /clarify (original question + assembled answers) and replaces that turn.
  */
 import { useEffect, useRef, useState } from "react";
-import { askStream, clarify, getHealth, getCollections, ApiError, type AskResponse, type Collection, type Health, type Provider } from "./lib/api";
+import { askStream, clarify, getHealth, getCollections, getModelConfig, getRuntimeStatus, ApiError, type AskResponse, type Collection, type Health, type ModelConfig } from "./lib/api";
 import type { Turn, AssistantTurn } from "./lib/types";
 import { DEMO, DEMO_VARIANT, demoAnswer, demoClarify } from "./demo";
 import {
@@ -26,13 +26,15 @@ import {
   newThreadId,
   setThreadMatter,
   knownMatters,
+  groupByMatter,
 } from "./lib/threads";
 import ChatMessage from "./components/ChatMessage";
 import CycleBanner from "./components/CycleBanner";
 import ReviewQueue from "./components/ReviewQueue";
 import LibraryDrawer from "./components/LibraryDrawer";
 import HistoryDrawer from "./components/HistoryDrawer";
-import { SendIcon, StopIcon, ChevronIcon, BrandMark, SparkIcon, ListIcon, PlusIcon, ClockIcon, BookIcon } from "./components/icons";
+import RuntimeDrawer from "./components/RuntimeDrawer";
+import { SendIcon, StopIcon, ChevronIcon, BrandMark, ListIcon, PlusIcon, ClockIcon, BookIcon } from "./components/icons";
 
 let _seq = 0;
 const uid = () => `${Date.now().toString(36)}-${(_seq++).toString(36)}`;
@@ -107,14 +109,18 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
-  const [provider, setProvider] = useState<Provider>(null); // null = backend default
-  const [deep, setDeep] = useState(DEMO && DEMO_VARIANT !== "clarify");
+  // Provider/deep are intentionally fixed: grounded answers use local oMLX with deep disabled.
   const [showContext, setShowContext] = useState(false);
   const [buildingContext, setBuildingContext] = useState("");
 
   const [health, setHealth] = useState<Health | null>(null);
+  const [engineState, setEngineState] = useState<"checking" | "online" | "offline">("checking");
+  const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null);
+  const [selectedGenerator, setSelectedGenerator] = useState<string>("");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Stored code-edition collections + the marshal's current pick. `selectedCollection`
   // holds a collection NAME when a legacy edition is chosen, or null for the active one.
@@ -136,12 +142,32 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Holds the AbortController for the in-flight send so Stop can cancel it.
   const abortRef = useRef<AbortController | null>(null);
+  const didAutoScroll = useRef(false);
 
   useEffect(() => {
     let alive = true;
     getHealth()
-      .then((h) => alive && setHealth(h))
-      .catch(() => {/* header shows defaults if /health is unreachable */});
+      .then((h) => {
+        if (!alive) return;
+        setHealth(h);
+        setSelectedGenerator((current) => current || h.generator_model || h.model || "");
+        // API health only proves the app backend is reachable. The runtime endpoint tells us
+        // whether oMLX itself is actually running, so the header never promises a live engine
+        // while the model server is stopped.
+        getRuntimeStatus()
+          .then((runtime) => alive && setEngineState(runtime.running ? "online" : "offline"))
+          .catch(() => alive && setEngineState(h.ok ? "online" : "offline"));
+      })
+      .catch(() => {
+        if (alive) setEngineState("offline");
+      });
+    getModelConfig()
+      .then((m) => {
+        if (!alive) return;
+        setModelConfig(m);
+        setSelectedGenerator((current) => current || m.active_generator || m.generator_models[0] || "");
+      })
+      .catch(() => {/* model switcher shows fallback from health */});
     return () => { alive = false; };
   }, []);
 
@@ -187,8 +213,21 @@ export default function App() {
   // Smart auto-scroll: only follow new content when the user is already near the
   // bottom, so scrolling up to read isn't yanked back down on every token.
   useEffect(() => {
+    // The demo is an intentional first impression, so it should open at the answer
+    // rather than automatically jumping past it to the feedback controls. In real
+    // conversations, keep the usual follow-the-latest behavior.
+    if (!didAutoScroll.current) {
+      didAutoScroll.current = true;
+      if (DEMO) return;
+    }
     if (atBottom) scrollToBottom();
   }, [turns, atBottom]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 3800);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   // ⌘K / Ctrl-K focuses the composer from anywhere in the app.
   useEffect(() => {
@@ -258,7 +297,8 @@ export default function App() {
     try {
       await askStream(
         // `collection: undefined` = the backend's active edition; a name = a legacy cycle.
-        { question, building_context: ctx || undefined, deep, provider,
+        { question, building_context: ctx || undefined, deep: false, provider: "local",
+          generator_model: selectedGenerator || undefined,
           collection: selectedCollection ?? undefined,
           history: history.length ? history : undefined },
         {
@@ -308,6 +348,7 @@ export default function App() {
                   escalated: m.escalated,
                   confidence: m.confidence ?? null,
                   confidence_band: m.confidence_band ?? null,
+                  trace: m.trace,
                 };
                 return { ...turn, status: "done", response };
               }),
@@ -423,8 +464,9 @@ export default function App() {
         question: turn.question,
         answers,
         building_context: turn.buildingContext || undefined,
-        deep,
-        provider,
+        deep: false,
+        provider: "local",
+        generator_model: selectedGenerator || undefined,
         // The follow-up must search the SAME edition the original question did.
         collection: selectedCollection ?? undefined,
         history: recentExchanges(turns),
@@ -439,6 +481,15 @@ export default function App() {
     }
   }
 
+  function handleRuntimeChange(running: boolean, activeModel: string, message: string) {
+    setEngineState(running ? "online" : "offline");
+    if (activeModel) {
+      setSelectedGenerator(activeModel);
+      setModelConfig((current) => current ? { ...current, active_generator: activeModel, thinking: "off" } : current);
+    }
+    setNotice(message);
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -447,9 +498,10 @@ export default function App() {
   }
 
   const providerLabel =
-    health?.generation_provider === "anthropic" ? "Anthropic"
-      : health?.generation_provider === "openai" ? "OpenAI"
-        : "Local";
+    engineState === "online" ? "oMLX local"
+      : engineState === "checking" ? "Checking local engine"
+        : "Engine unavailable";
+  const activeGenerator = selectedGenerator || modelConfig?.active_generator || health?.generator_model || health?.model || "";
 
   // Only offer the edition picker when there's a real choice (≥2 collections).
   const showEditionSelector = collections.length >= 2;
@@ -462,10 +514,21 @@ export default function App() {
       : collections.find((c) => c.name === selectedCollection && !c.active) ?? null;
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="app-shell flex h-screen overflow-hidden">
+      {!DEMO && (
+        <SavedChatsSidebar
+          threads={threads}
+          activeId={activeId}
+          sending={sending || clarifyBusy}
+          onNew={handleNewChat}
+          onSelect={handleSelectThread}
+          onDelete={handleDeleteThread}
+        />
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
       {/* ----------------------------------------------------------- Header */}
       <header className="sticky top-0 z-20 border-b border-white/10 bg-navy-950/70 backdrop-blur-xl">
-        <div className="mx-auto w-full max-w-3xl px-4 py-3">
+        <div className="mx-auto w-full max-w-6xl px-5 py-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="grid h-10 w-10 place-items-center rounded-xl bg-navy-800 text-coral-500 shadow-glow-sm ring-1 ring-white/10">
@@ -491,7 +554,7 @@ export default function App() {
                   disabled={sending}
                   aria-label="New conversation"
                   title="New conversation"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100 disabled:cursor-not-allowed disabled:opacity-50 lg:hidden"
                 >
                   <PlusIcon className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">New</span>
@@ -505,7 +568,7 @@ export default function App() {
                   onClick={() => setHistoryOpen(true)}
                   aria-label="Open conversation history"
                   title="History"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100 lg:hidden"
                 >
                   <ClockIcon className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">History</span>
@@ -546,14 +609,25 @@ export default function App() {
                 />
               )}
 
-              <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 sm:flex">
-                <span
-                  className={"h-1.5 w-1.5 rounded-full " + (health?.ok ? "bg-verified-500 shadow-[0_0_8px] shadow-verified-500/70" : "bg-steel-500")}
-                />
-                <span className="text-xs font-medium text-steel-200">{providerLabel}</span>
-                {health?.model && (
-                  <span className="font-mono text-[11px] text-steel-400">· {health.model}</span>
-                )}
+              <div
+                className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2 py-1.5 sm:gap-2 sm:px-3"
+                title="Local runtime controls"
+                aria-live="polite"
+                aria-label={`${providerLabel}${activeGenerator ? `, ${shortModel(activeGenerator)}` : ""}`}
+              >
+                <span className={"h-1.5 w-1.5 shrink-0 rounded-full " + (engineState === "online" ? "bg-verified-500 shadow-[0_0_8px] shadow-verified-500/70" : engineState === "offline" ? "bg-critical-600" : "bg-steel-500 animate-blink")} />
+                <span className="text-[11px] font-medium text-steel-200 md:hidden">{engineState === "online" ? "Local" : engineState === "checking" ? "Checking" : "Offline"}</span>
+                <span className="hidden text-xs font-medium text-steel-200 md:inline">{providerLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => setRuntimeOpen(true)}
+                  className="max-w-[104px] truncate rounded-md px-1 font-mono text-[10px] text-steel-300 transition hover:bg-white/[0.06] hover:text-steel-100 focus:outline-none sm:max-w-[190px] sm:text-[11px]"
+                  aria-label="Open local model picker"
+                  title={activeGenerator ? `Open model picker (active: ${shortModel(activeGenerator)})` : "Open model picker"}
+                >
+                  {activeGenerator ? shortModel(activeGenerator) : "Choose model"}
+                </button>
+                {engineState === "online" && <span className="hidden rounded-full border border-verified-500/20 bg-verified-500/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-verified-700 sm:inline-flex">grounded</span>}
               </div>
             </div>
           </div>
@@ -564,9 +638,15 @@ export default function App() {
         </div>
       </header>
 
+      {notice && (
+        <div role="status" aria-live="polite" className="fixed right-5 top-[5.5rem] z-30 max-w-sm rounded-xl border border-white/10 bg-navy-800/95 px-3.5 py-2.5 text-sm text-steel-100 shadow-card backdrop-blur-xl animate-rise">
+          {notice}
+        </div>
+      )}
+
       {/* ------------------------------------------------------- Message log */}
       <main ref={logRef} onScroll={onLogScroll} className="scroll-thin flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
+        <div className="mx-auto w-full max-w-5xl space-y-5 px-4 py-6">
           {turns.length === 0 ? (
             <EmptyState onPick={(ex) => { setDraft(ex); textareaRef.current?.focus(); }} />
           ) : (
@@ -590,7 +670,7 @@ export default function App() {
           </button>
         )}
 
-        <div className="mx-auto w-full max-w-3xl px-4 py-3">
+        <div className="mx-auto w-full max-w-5xl px-5 py-4">
           {/* Off-active-edition notice — makes it obvious the answers won't come from
               the currently adopted cycle (the system prompt already warns not to blend). */}
           {legacyCollection && (
@@ -667,24 +747,13 @@ export default function App() {
             )}
           </div>
 
-          {/* Option toggles. */}
-          <div className="mt-2.5 flex flex-wrap items-center gap-3 text-xs">
-            <ProviderToggle value={provider} onChange={setProvider} />
-            <button
-              type="button"
-              onClick={() => setDeep((v) => !v)}
-              aria-pressed={deep}
-              className={
-                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 font-medium transition active:scale-95 " +
-                (deep
-                  ? "border-coral-500/50 bg-coral-500/15 text-coral-200"
-                  : "border-white/10 bg-white/[0.03] text-steel-400 hover:text-steel-200")
-              }
-            >
-              <SparkIcon className="h-3.5 w-3.5" />
-              Deep
-            </button>
-            <span className="text-steel-500">escalate hard questions to the stronger model</span>
+          {/* Compact privacy cue — generator selection lives in the top runtime bar. */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-steel-500">
+            <span className="font-medium text-steel-400">Local-only workspace</span>
+            <span aria-hidden="true">·</span>
+            <span>sources stay on this workstation</span>
+            <span aria-hidden="true">·</span>
+            <span>thinking off</span>
           </div>
         </div>
       </footer>
@@ -714,40 +783,136 @@ export default function App() {
         onSetMatter={handleSetMatter}
         knownMatters={knownMatters(threads)}
       />
+      <RuntimeDrawer
+        open={runtimeOpen}
+        onClose={() => setRuntimeOpen(false)}
+        onRuntimeChange={handleRuntimeChange}
+      />
+      </div>
     </div>
   );
 }
 
 /* ----------------------------------------------------------- subcomponents -- */
 
-/** Segmented Local | Anthropic provider control. `null` keeps the backend default. */
-function ProviderToggle({ value, onChange }: { value: Provider; onChange: (p: Provider) => void }) {
-  const opts: { label: string; val: Provider }[] = [
-    { label: "Local", val: "local" },
-    { label: "OpenAI", val: "openai" },
-    { label: "Anthropic", val: "anthropic" },
-  ];
+function shortModel(id: string): string {
+  return id.split("/").pop() ?? id;
+}
+
+/** Left rail — saved local chats are first-class, not hidden in a drawer. */
+function SavedChatsSidebar({
+  threads,
+  activeId,
+  sending,
+  onNew,
+  onSelect,
+  onDelete,
+}: {
+  threads: Thread[];
+  activeId: string;
+  sending: boolean;
+  onNew: () => void;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const groups = groupByMatter(threads);
   return (
-    <div className="inline-flex items-center overflow-hidden rounded-md border border-white/10 bg-white/[0.03]" role="group" aria-label="Generation provider">
-      <span className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-steel-500">Provider</span>
-      {opts.map((o) => {
-        const active = value === o.val;
-        return (
-          <button
-            key={o.label}
-            type="button"
-            onClick={() => onChange(active ? null : o.val)}
-            aria-pressed={active}
-            className={
-              "border-l border-white/10 px-2.5 py-1.5 font-medium transition-colors " +
-              (active ? "bg-coral-500 text-white" : "text-steel-400 hover:bg-white/[0.05] hover:text-steel-200")
-            }
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+    <aside className="hidden w-[310px] shrink-0 border-r border-white/[0.07] bg-navy-950/70 px-4 py-5 backdrop-blur-2xl lg:flex lg:flex-col">
+      <div className="mb-5 px-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-coral-300/80">Hartford AHJ</div>
+        <div className="mt-1 font-serif text-[30px] leading-none text-white">
+          Fire Code <span className="italic text-coral-300">studio</span>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-steel-400">
+          Saved chats, local code books, and oMLX runtime controls. Nothing leaves the workstation.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={onNew}
+        disabled={sending}
+        className="mb-4 inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-coral-400/30 bg-coral-500/15 px-4 text-sm font-semibold text-coral-100 shadow-glow-sm transition hover:bg-coral-500/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <PlusIcon className="h-4 w-4" />
+        New inspection chat
+      </button>
+
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-steel-500">Saved chats</span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-steel-400">{threads.length}</span>
+        </div>
+        {threads.length === 0 ? (
+          <div className="glass rounded-2xl p-4 text-sm leading-relaxed text-steel-400">
+            Ask your first question and it will appear here automatically.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {groups.map((group) => (
+              <section key={group.matter ?? "unfiled"}>
+                <div className="mb-2 px-1 font-mono text-[10px] uppercase tracking-[0.18em] text-coral-300/70">
+                  {group.matter ?? "Unfiled"}
+                </div>
+                <div className="space-y-2">
+                  {group.threads.map((t) => {
+                    const active = t.id === activeId;
+                    return (
+                      <div
+                        key={t.id}
+                        className={
+                          "group relative rounded-2xl border transition " +
+                          (active
+                            ? "border-coral-400/35 bg-coral-500/12 shadow-glow-sm"
+                            : "border-white/[0.07] bg-white/[0.035] hover:border-white/15 hover:bg-white/[0.06]")
+                        }
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelect(t.id)}
+                          disabled={sending}
+                          aria-current={active ? "page" : undefined}
+                          className="w-full rounded-2xl p-3 pr-10 text-left transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {active && <span className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r bg-coral-300 shadow-[0_0_10px] shadow-coral-400" />}
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 h-8 w-8 shrink-0 rounded-full bg-[radial-gradient(circle_at_32%_28%,rgba(255,255,255,.9),transparent_24%),radial-gradient(circle_at_60%_70%,rgba(255,92,66,.7),rgba(255,92,66,.15)_58%,rgba(255,255,255,.06))] shadow-[0_0_18px_rgba(255,92,66,.28)]" />
+                            <div className="min-w-0 flex-1">
+                              <div className="line-clamp-2 text-sm font-semibold leading-snug text-steel-100">{t.title}</div>
+                              <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-steel-500">
+                                {new Date(t.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" })} · {t.turns.length} turns
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDelete(t.id)}
+                          disabled={sending}
+                          className="absolute right-2 top-2 rounded-lg px-2 py-1 text-xs text-steel-500 opacity-0 transition hover:bg-white/10 hover:text-critical-700 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed"
+                          aria-label={`Delete ${t.title}`}
+                          title="Delete saved chat"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.035] p-3">
+        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-coral-300/80">Wired</div>
+        <div className="mt-2 flex items-center justify-between text-xs text-steel-400">
+          <span>localStorage only</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-verified-500 shadow-[0_0_10px] shadow-verified-500/70" />
+        </div>
+      </div>
+    </aside>
   );
 }
 

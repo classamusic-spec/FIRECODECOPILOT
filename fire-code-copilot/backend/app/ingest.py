@@ -32,8 +32,31 @@ def _books_manifest() -> dict:
     return {}
 
 
-def _meta_for(pdf: Path, manifest: dict) -> dict:
-    entry = manifest.get(pdf.name, {})
+def _pdfs(books_dir: Path) -> list[Path]:
+    """All PDFs under the configured books folder, including organized subfolders."""
+    return sorted(p for p in books_dir.rglob("*.pdf") if p.is_file())
+
+
+def _book_key(pdf: Path, books_dir: Path) -> str:
+    """Stable source key stored in Chroma/state: POSIX relative path from CODE_BOOKS_DIR."""
+    try:
+        return pdf.relative_to(books_dir).as_posix()
+    except ValueError:
+        return pdf.name
+
+
+def _collection_name(base: str, version_suffix: str | None = None) -> str:
+    """Keep the adopted index untouched when running an OCR/BGE candidate ingest for A/B eval."""
+    suffix = (version_suffix if version_suffix is not None else settings.index_version_suffix).strip()
+    clean = re.sub(r"[^a-zA-Z0-9_-]+", "-", suffix).strip("-")
+    return f"{base}__{clean}" if clean else base
+
+
+def _meta_for(pdf: Path, manifest: dict, books_dir: Path | None = None) -> dict:
+    # Prefer a relative path manifest key for nested folders, but keep the old bare-filename
+    # lookup for backwards compatibility with existing top-level books.yaml files.
+    key = _book_key(pdf, books_dir) if books_dir else pdf.name
+    entry = manifest.get(key, manifest.get(pdf.name, {}))
     name = pdf.stem
     return {
         "book": entry.get("book", name),
@@ -58,14 +81,56 @@ def _pypdf_pages(pdf: Path) -> list[str] | None:
         return None
 
 
-def _ocr_page(page, lang: str) -> str:
-    """OCR one page: render it to an image and run Tesseract. Lazy-imports the optional deps."""
-    import io
-    import pytesseract
-    from PIL import Image
-    pix = page.get_pixmap(dpi=200)
-    img = Image.open(io.BytesIO(pix.tobytes("png")))
-    return pytesseract.image_to_string(img, lang=lang)
+def _page_png(page) -> bytes:
+    """Render a page once for oMLX vision/OCR. Kept as bytes for cache hashing too."""
+    return page.get_pixmap(dpi=settings.ocr_dpi, alpha=False).tobytes("png")
+
+
+def _omlx_ocr(png: bytes, *, model: str, table_mode: bool = False) -> str:
+    """Ask a local oMLX vision model for clean Markdown. No in-process OCR dependency."""
+    import base64
+    from openai import OpenAI
+    instruction = (
+        "Transcribe this fire/building code page faithfully as structured Markdown. Preserve section "
+        "numbers, headings, paragraphs, footnotes, and line breaks. Do not summarize or invent text."
+    )
+    if table_mode:
+        instruction += " Reconstruct every visible table as a GitHub-flavored Markdown table; preserve exact headers, rows, and numeric values."
+    client = OpenAI(base_url=settings.local_base_url, api_key=settings.local_api_key or "not-needed")
+    data_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    response = client.chat.completions.create(
+        model=model,
+        temperature=0,
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": instruction},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]}],
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+def _looks_table_heavy(page, extracted: str) -> bool:
+    """Cheap local gate: table OCR is never called unless explicitly enabled and page looks tabular."""
+    if "table" in (extracted or "").lower() or "|" in (extracted or ""):
+        return True
+    try:
+        return bool(getattr(page.find_tables(), "tables", []) or [])
+    except Exception:
+        return False
+
+
+def _ocr_page(page, extracted: str, cache: dict, page_no: int) -> tuple[str, bool]:
+    """Return cached/default OCR Markdown and whether table OCR supplied it."""
+    png = _page_png(page)
+    page_hash = hashlib.sha256(png).hexdigest()
+    table = bool(settings.ocr_table_enabled and _looks_table_heavy(page, extracted))
+    model = settings.ocr_table_model if table else settings.ocr_model
+    key = f"{settings.ocr_cache_version}|{model}|{page_hash}"
+    if key not in cache:
+        cache[key] = {"markdown": _omlx_ocr(png, model=model, table_mode=table), "table_mode": table,
+                      "page": page_no}
+    entry = cache[key]
+    return str(entry.get("markdown", "")), bool(entry.get("table_mode"))
 
 
 def _ocr_cache_path(pdf: Path) -> Path:
@@ -145,10 +210,10 @@ def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
     doc = fitz.open(pdf)
     pages: list[tuple[int, str]] = []
     pypdf_text: list[str] | None = None
-    empty = image_only = ocr_pages = 0
+    empty = image_only = ocr_pages = table_ocr_pages = 0
     used_fallback = False
 
-    # OCR cache (only touched when OCR is enabled).
+    # OCR cache is keyed per rendered-page hash + model/version, so a PDF edit only re-OCRs changed pages.
     ocr_cache: dict = {}
     ocr_cache_dirty = False
     if settings.use_ocr:
@@ -157,25 +222,24 @@ def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
 
     for i, page in enumerate(doc):
         text = _page_text(page)                    # reading-order aware (de-interleaves columns)
+        if settings.use_ocr:
+            try:
+                ocr_text, table_mode = _ocr_page(page, text, ocr_cache, i + 1)
+                ocr_cache_dirty = True
+                if len(ocr_text.strip()) >= _MIN_PAGE_CHARS:
+                    text, ocr_pages = ocr_text, ocr_pages + 1
+                    table_ocr_pages += int(table_mode)
+            except Exception as exc:
+                # Retain selectable-text extraction if a model/page fails; ingest must be resumable.
+                print(f"  OCR warning page {i + 1}: {type(exc).__name__}: {exc}")
         if len(text.strip()) < _MIN_PAGE_CHARS:
             if pypdf_text is None:
                 pypdf_text = _pypdf_pages(pdf) or []
             alt = pypdf_text[i] if i < len(pypdf_text) else ""
             if len(alt.strip()) >= _MIN_PAGE_CHARS:
                 text, used_fallback = alt, True
-            elif page.get_images():            # near-empty but has images → scanned page
-                if settings.use_ocr:
-                    key = str(i)
-                    if key not in ocr_cache:
-                        ocr_cache[key] = _ocr_page(page, settings.ocr_language)
-                        ocr_cache_dirty = True
-                    ocr_text = ocr_cache[key]
-                    if len(ocr_text.strip()) >= _MIN_PAGE_CHARS:
-                        text, ocr_pages = ocr_text, ocr_pages + 1
-                    else:
-                        empty += 1; image_only += 1
-                else:
-                    empty += 1; image_only += 1
+            elif page.get_images():
+                empty += 1; image_only += 1
             else:
                 empty += 1
         pages.append((i + 1, text))
@@ -184,7 +248,9 @@ def _read_pdf(pdf: Path) -> tuple[list[tuple[int, str]], dict]:
         _save_json(_ocr_cache_path(pdf), ocr_cache)
 
     info = {"pages": len(pages), "empty_pages": empty, "image_only_pages": image_only,
-            "ocr_pages": ocr_pages, "needs_ocr": image_only > 0, "used_pypdf_fallback": used_fallback}
+            "ocr_pages": ocr_pages, "table_ocr_pages": table_ocr_pages,
+            "needs_ocr": image_only > 0, "used_pypdf_fallback": used_fallback}
+    doc.close()
     return pages, info
 
 
@@ -239,7 +305,7 @@ def _save_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2))
 
 
-def ingest(force: bool = False, on_event=None) -> dict:
+def ingest(force: bool = False, on_event=None, version_suffix: str | None = None) -> dict:
     """Index every PDF in the books folder. `on_event`, when given, receives progress dicts
     ({"type": "start"|"file"|"file_done"|"removed"|"done", ...}) so a UI can show live progress
     instead of staring at a blocked request."""
@@ -253,7 +319,7 @@ def ingest(force: bool = False, on_event=None) -> dict:
                 pass  # progress reporting must never break indexing
 
     books_dir = Path(os.path.expanduser(settings.code_books_dir))
-    pdfs = sorted(books_dir.glob("*.pdf"))
+    pdfs = _pdfs(books_dir)
     if not pdfs:
         return {"error": f"No PDFs found in {books_dir}. Put your code books there."}
     emit({"type": "start", "files": len(pdfs)})
@@ -262,6 +328,25 @@ def ingest(force: bool = False, on_event=None) -> dict:
     state = _load_json(STATE_FILE)
     collections_idx = _load_json(COLLECTIONS_FILE)   # cumulative: {collection: {file: {...}}}
     client = chromadb.PersistentClient(path=settings.chroma_dir)
+
+    if force:
+        # A forced ingest must recreate collections, not just overwrite rows. Chroma fixes a
+        # collection's embedding dimension at first insert; switching from the old 384-dim local
+        # embedder to oMLX/BGE-M3's 1024-dim vectors otherwise fails with a dimension mismatch.
+        target_collections = {_collection_name(settings.active_collection, version_suffix), *collections_idx.keys()}
+        for pdf in pdfs:
+            try:
+                target_collections.add(_collection_name(_meta_for(pdf, manifest, books_dir)["collection"], version_suffix))
+            except Exception:
+                pass
+        for cname in sorted(c for c in target_collections if c):
+            try:
+                client.delete_collection(cname)
+                print(f"  reset collection '{cname}' for forced re-ingest")
+            except Exception:
+                pass
+        state = {}
+        collections_idx = {}
 
     open_colls: dict[str, object] = {}
     def _coll(name: str):
@@ -273,21 +358,22 @@ def ingest(force: bool = False, on_event=None) -> dict:
     summary = {"chunks_added": 0, "skipped": []}
 
     for pdf in pdfs:
-        meta = _meta_for(pdf, manifest)
-        cname = meta["collection"]
+        key = _book_key(pdf, books_dir)
+        meta = _meta_for(pdf, manifest, books_dir)
+        cname = _collection_name(meta["collection"], version_suffix)
         h = _file_hash(pdf)
-        stamp = f"{h}|{cname}"                        # re-ingest if the file OR its collection changed
-        if not force and state.get(pdf.name) == stamp:
-            summary["skipped"].append(pdf.name)
-            emit({"type": "file", "file": pdf.name, "status": "skipped"})
+        stamp = f"{h}|{cname}|{settings.embedding_model}|{settings.ingest_version}"
+        if not force and state.get(key) == stamp:
+            summary["skipped"].append(key)
+            emit({"type": "file", "file": key, "status": "skipped"})
             continue
 
-        emit({"type": "file", "file": pdf.name, "status": "indexing"})
+        emit({"type": "file", "file": key, "status": "indexing"})
         pages, pdf_info = _read_pdf(pdf)
         if pdf_info["needs_ocr"]:
             summary.setdefault("needs_ocr", []).append(
-                {"file": pdf.name, "image_only_pages": pdf_info["image_only_pages"]})
-            print(f"  ⚠️  {pdf.name}: {pdf_info['image_only_pages']} image-only page(s) yielded no "
+                {"file": key, "image_only_pages": pdf_info["image_only_pages"]})
+            print(f"  ⚠️  {key}: {pdf_info['image_only_pages']} image-only page(s) yielded no "
                   f"text — this book is scanned and needs OCR. Run e.g. "
                   f"`ocrmypdf in.pdf out.pdf` (brew install ocrmypdf), then re-ingest the OCR'd copy.")
         chunks = chunk_pages(pages, meta)
@@ -298,11 +384,13 @@ def ingest(force: bool = False, on_event=None) -> dict:
 
         # Ids are keyed by the FILE (not the book label): two volumes sharing a `book` value must
         # not overwrite each other's chunks.
-        ids = [f"{pdf.name}|{c['metadata']['page']}|{i}" for i, c in enumerate(chunks)]
+        ids = [f"{key}|{c['metadata']['page']}|{i}" for i, c in enumerate(chunks)]
         texts = [c["text"] for c in chunks]
         metas = [c["metadata"] for c in chunks]
         for m in metas:
-            m["source"] = pdf.name                    # provenance + lets re-ingest purge cleanly
+            m["source"] = key                         # provenance + lets re-ingest purge cleanly
+            m["ingest_version"] = settings.ingest_version
+            m["embedding_model"] = settings.embedding_model
 
         coll = _coll(cname)
         # Re-ingest hygiene: drop this file's PRIOR vectors before re-indexing it. Chunk ids are
@@ -312,37 +400,37 @@ def ingest(force: bool = False, on_event=None) -> dict:
         # manifest moved this file to a DIFFERENT collection, purge its copy from the old one too,
         # so a stale duplicate can't keep answering queries in the previous cycle.
         try:
-            coll.delete(where={"source": pdf.name})
+            coll.delete(where={"source": key})
         except Exception:
             pass
         for old_cname, files in list(collections_idx.items()):
-            if old_cname != cname and pdf.name in files:
+            if old_cname != cname and key in files:
                 try:
-                    _coll(old_cname).delete(where={"source": pdf.name})
+                    _coll(old_cname).delete(where={"source": key})
                 except Exception:
                     pass
-                files.pop(pdf.name, None)
+                files.pop(key, None)
         B = 64                                        # batch embed+upsert to keep memory flat
         for s in range(0, len(texts), B):
             vecs = embeddings.embed(texts[s:s + B], input_type="document")
             coll.upsert(ids=ids[s:s + B], documents=texts[s:s + B],
                         metadatas=metas[s:s + B], embeddings=vecs)
 
-        state[pdf.name] = stamp
-        collections_idx.setdefault(cname, {})[pdf.name] = {
+        state[key] = stamp
+        collections_idx.setdefault(cname, {})[key] = {
             "book": meta["book"], "edition": meta["edition"],
             "amendment_doc": meta["is_amendment_doc"], "chunks": len(chunks)}
-        per_collection[cname]["books"].append({"file": pdf.name, "chunks": len(chunks),
+        per_collection[cname]["books"].append({"file": key, "chunks": len(chunks),
                                                "edition": meta["edition"],
                                                "amendment_doc": meta["is_amendment_doc"]})
         per_collection[cname]["chunks"] += len(chunks)
         summary["chunks_added"] += len(chunks)
-        emit({"type": "file_done", "file": pdf.name, "chunks": len(chunks), "collection": cname})
-        print(f"  indexed {pdf.name}: {len(chunks)} chunks -> collection '{cname}'")
+        emit({"type": "file_done", "file": key, "chunks": len(chunks), "collection": cname})
+        print(f"  indexed {key}: {len(chunks)} chunks -> collection '{cname}'")
 
     # Files DELETED from the books folder: purge their chunks from every collection that holds
     # them. Without this, removing a book leaves its text permanently retrievable and citable.
-    current = {p.name for p in pdfs}
+    current = {_book_key(p, books_dir) for p in pdfs}
     for gone in [name for name in state if name not in current]:
         for old_cname, files in list(collections_idx.items()):
             if gone in files:
@@ -382,17 +470,18 @@ def list_books() -> list[dict]:
         for fname, info in files.items():
             indexed_in[fname] = (cname, int(info.get("chunks", 0)))
     out = []
-    for pdf in sorted(books_dir.glob("*.pdf")):
-        meta = _meta_for(pdf, manifest)
-        coll, chunks = indexed_in.get(pdf.name, ("", 0))
+    for pdf in _pdfs(books_dir):
+        key = _book_key(pdf, books_dir)
+        meta = _meta_for(pdf, manifest, books_dir)
+        coll, chunks = indexed_in.get(key, ("", 0))
         out.append({
-            "file": pdf.name,
+            "file": key,
             "book": meta["book"],
             "edition": meta["edition"],
             "collection": meta["collection"],
             "is_amendment_doc": meta["is_amendment_doc"],
-            "in_manifest": pdf.name in manifest,
-            "indexed": pdf.name in state,
+            "in_manifest": key in manifest or pdf.name in manifest,
+            "indexed": key in state,
             "indexed_collection": coll,
             "chunks": chunks,
         })
@@ -409,7 +498,7 @@ def save_books_manifest(entries: dict) -> dict:
     the known fields are kept. The manifest lives in the gitignored books folder."""
     import yaml
     books_dir = Path(os.path.expanduser(settings.code_books_dir))
-    present = {p.name for p in books_dir.glob("*.pdf")}
+    present = {_book_key(p, books_dir) for p in _pdfs(books_dir)}
     clean: dict[str, dict] = {}
     for fname, fields in (entries or {}).items():
         if fname not in present or not isinstance(fields, dict):
@@ -462,13 +551,14 @@ def inspect(samples: int = 2) -> dict:
         python -m app.ingest --inspect
     """
     books_dir = Path(os.path.expanduser(settings.code_books_dir))
-    pdfs = sorted(books_dir.glob("*.pdf"))
+    pdfs = _pdfs(books_dir)
     if not pdfs:
         return {"error": f"No PDFs found in {books_dir}. Put your code books there."}
     manifest = _books_manifest()
 
     for pdf in pdfs:
-        meta = _meta_for(pdf, manifest)
+        key = _book_key(pdf, books_dir)
+        meta = _meta_for(pdf, manifest, books_dir)
         pages, pdf_info = _read_pdf(pdf)
         chunks = chunk_pages(pages, meta)
         sections = [c["metadata"]["section"] for c in chunks]
@@ -477,7 +567,7 @@ def inspect(samples: int = 2) -> dict:
         amend = sum(c["metadata"]["is_amendment"] for c in chunks)
         sizes = sorted(len(c["text"].split()) for c in chunks) or [0]
 
-        print(f"\n===== {pdf.name} =====")
+        print(f"\n===== {key} =====")
         print(f"  book={meta['book']!r} edition={meta['edition']!r} "
               f"collection={meta['collection']!r} amendment_doc={meta['is_amendment_doc']}")
         print(f"  pages={len(pages)}  chunks={len(chunks)}  tables={tables}  amendment_chunks={amend}")

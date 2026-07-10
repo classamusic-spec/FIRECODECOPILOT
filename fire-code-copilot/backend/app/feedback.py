@@ -17,6 +17,12 @@ from .settings import settings
 from . import embeddings
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS verified_answers (
+    id TEXT PRIMARY KEY, question TEXT NOT NULL, answer TEXT NOT NULL, edition TEXT NOT NULL,
+    citations_json TEXT NOT NULL, verified_by TEXT NOT NULL, verified_at TEXT NOT NULL,
+    question_embedding TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS feedback (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at      TEXT NOT NULL,
@@ -35,7 +41,7 @@ def _conn() -> sqlite3.Connection:
     Path(settings.feedback_db).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.feedback_db)
     conn.row_factory = sqlite3.Row
-    conn.execute(_SCHEMA)
+    conn.executescript(_SCHEMA)
     return conn
 
 
@@ -87,7 +93,10 @@ def promote_verified(*, question: str, corrected_answer: str,
         "sections_json": json.dumps(sections),
         "verified_at": _now(),
     }
-    vcoll.upsert(ids=[vid], documents=[doc], metadatas=[meta], embeddings=[qvec])
+    vcoll.upsert(ids=[vid], documents=[doc], metadatas=meta and [meta], embeddings=[qvec])
+    with _conn() as conn:
+        conn.execute("INSERT OR REPLACE INTO verified_answers (id,question,answer,edition,citations_json,verified_by,verified_at,question_embedding) VALUES (?,?,?,?,?,?,?,?)",
+                     (vid, question, corrected_answer, meta["edition"], json.dumps(sections), "marshal", meta["verified_at"], json.dumps(qvec)))
     return {"id": vid, "collection": settings.verified_collection, "sections": sections}
 
 
@@ -143,3 +152,19 @@ def review_queue(limit: int = 50) -> list[dict]:
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def find_precedent(question: str, edition: str) -> dict | None:
+    """SQLite semantic match used as a labeled precedent only; normal retrieval/validation still run."""
+    import math
+    q = embeddings.embed([question], input_type="query")[0]
+    best = None
+    with _conn() as conn:
+        for row in conn.execute("SELECT * FROM verified_answers WHERE edition=?", (edition,)).fetchall():
+            try: v = json.loads(row["question_embedding"])
+            except Exception: continue
+            dot = sum(float(a)*float(b) for a,b in zip(q,v)); nq=math.sqrt(sum(float(a)*float(a) for a in q)); nv=math.sqrt(sum(float(b)*float(b) for b in v))
+            score = dot / max(nq*nv, 1e-9)
+            if score >= settings.verified_match_threshold and (best is None or score > best["score"]):
+                best = {"id": row["id"], "question": row["question"], "answer": row["answer"], "edition": row["edition"], "verified_by": row["verified_by"], "verified_at": row["verified_at"], "score": score}
+    return best

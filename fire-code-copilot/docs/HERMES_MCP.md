@@ -9,7 +9,7 @@ layering, and citation validation all still run **locally on your Mac**.
 
 | Tool | What it does |
 |---|---|
-| `fire_code_lookup` | The main tool. `mode="retrieve"` (default) returns grounded, amendment-layered source passages for *Hermes' model* to reason over — **needs no local LLM**, works even when LM Studio is closed. `mode="answer"` makes this app's own configured model compose a citation-validated answer. Supports `building_context`, `collection` (legacy editions), `deep`, and `history` (follow-up memory). |
+| `fire_code_lookup` | The main tool. `mode="retrieve"` (default) returns grounded, amendment-layered source passages for *Hermes' model* to reason over — **needs no local LLM**, works even when oMLX is stopped. `mode="answer"` makes this app's own configured oMLX generator compose a citation-validated answer. Supports `building_context`, `collection` (legacy editions), `deep`, and `history` (follow-up memory). |
 | `fire_code_list_editions` | Lists the indexed code-cycle collections so the agent can target a legacy edition. |
 | `fire_code_cycle_status` | The adopted CT editions + any pending-cycle warning. |
 
@@ -73,8 +73,8 @@ bash scripts/mcp_server.sh
 
 ## Things to know
 
-- **`mode="retrieve"` needs no LLM.** The whole Hermes flow works with LM Studio closed —
-  only `mode="answer"` (and the web UI) need the generation backend running.
+- **`mode="retrieve"` needs no LLM.** The whole Hermes flow works with oMLX stopped —
+  only `mode="answer"` (and the web UI answer path) need the oMLX generation backend running.
 - **Cold start:** the first lookup loads the local embedding model (~seconds once cached;
   the first-ever run downloads it). Subsequent calls are fast.
 - **Don't run ingest from two places at once.** Indexing from the web UI while Hermes is

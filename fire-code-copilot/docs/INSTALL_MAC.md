@@ -21,7 +21,7 @@ your machine, and it reads the code books from a folder on your Desktop. Nothing
    build a prompt with ONLY those 6 source passages
             │
             ▼
-   your LOCAL model (GLM-5.2 / Qwen / MiniMax via LM Studio) drafts the answer
+   your local oMLX generator drafts the answer with thinking off
             │
             ▼
    citation validator checks every cited § is really in the sources
@@ -30,19 +30,14 @@ your machine, and it reads the code books from a folder on your Desktop. Nothing
    answer + book/section/page citations  ──▶ you
 ```
 
-Three independent pieces run on your Mac: (1) a **model server** (LM Studio) serving your LLM,
+Three independent pieces run on your Mac: (1) an **oMLX model server** serving generation,
 (2) this **app** (retrieval + reranker + validator), (3) your **code books** folder. The app
 talks to the model over a local URL and reads the books from the folder you point it at.
 
 ## Step 1 — Prerequisites
 - **Python 3.11+**: `python3 --version` (install via [python.org] or `brew install python` if needed).
-- **A local model server.** Easiest is **LM Studio** (GUI). Download it, then in the Discover
-  tab grab an **MLX** build of your model:
-  - `GLM-5.2` (the 512GB-tuned MLX build — best quality), or
-  - `Qwen3.6` (smaller/faster), or `MiniMax-M3`.
-  - Load the model, open the **Developer / Local Server** tab, **Start Server**. It serves an
-    OpenAI-compatible API at `http://localhost:1234/v1`. Note the model's id (e.g. `glm-5.2`).
-  - (Alternative, no GUI: `pip install mlx-lm` then `mlx_lm.server --model <repo> --port 1234`.)
+- **oMLX running on `http://localhost:8000/v1`.** It serves the two switchable generators,
+  BGE-M3 embeddings, reranker, and OCR models through one OpenAI-compatible endpoint.
 
 ## Step 2 — Get the project + install deps
 ```bash
@@ -62,8 +57,10 @@ cp .env.example .env
 Open `.env` and set:
 ```
 GENERATION_PROVIDER=local
-LOCAL_BASE_URL=http://localhost:1234/v1   # LM Studio default (Ollama is :11434)
-LOCAL_MODEL=glm-5.2                        # the model id shown in your server
+LOCAL_BASE_URL=http://localhost:8000/v1
+GENERATOR_MODEL=mlx-community/gemma-4-26b-a4b-it-4bit
+GENERATOR_MODELS=mlx-community/gemma-4-26b-a4b-it-4bit,lmstudio-community/granite-4.0-h-small-MLX-4bit
+MLX_THINKING=off
 
 EMBEDDING_PROVIDER=local                   # embeddings stay on your machine
 LOCAL_EMBEDDING_MODEL=BAAI/bge-m3
@@ -108,25 +105,25 @@ answer. Type `cycle` to see the adopted editions, `quit` to exit.
 
 **Or run the API** (for a frontend or scripts later):
 ```bash
-uvicorn app.main:app --reload --port 8000
-curl -s localhost:8000/ask -H 'Content-Type: application/json' \
+uvicorn app.main:app --reload --port 8001
+curl -s localhost:8001/ask -H 'Content-Type: application/json' \
   -d '{"question":"egress width for 300 occupants, sprinklered","building_context":"Group A-2, new"}'
 ```
 
-## Swapping models (GLM ↔ Qwen ↔ MiniMax)
-1. In LM Studio, load the other model and Start Server.
-2. Set `LOCAL_MODEL` in `.env` to its id (or, if the server runs one model, the app can
+## Swapping models
+1. Keep both configured generators resident in oMLX.
+2. Use the frontend model switcher or set `GENERATOR_MODEL` in `.env` to its id.
    auto-use it).
 3. Restart the CLI/API. No re-ingest needed — embeddings are independent of the chat model.
 
 ## Daily use
-- Model server (LM Studio) running → `python -m app.cli` → ask away.
+- oMLX running → `python -m app.cli` → ask away.
 - New code cycle / new books? Drop PDFs in the folder, update `books.yaml`, re-run
   `python -m app.ingest`.
 
 ## Troubleshooting
-- **"Connection refused" / errors on ask** → the model server isn't running, or `LOCAL_BASE_URL`
-  is wrong. Confirm LM Studio's server is started and the port matches.
+- **"Connection refused" / errors on ask** → oMLX isn't running, or `LOCAL_BASE_URL`
+  is wrong. Confirm oMLX is serving on `http://localhost:8000/v1`.
 - **"collection does not exist"** → run `python -m app.ingest` first.
 - **Slow first answer** → the local embedding/reranker models load on first use; subsequent
   questions are fast. Big-context prompts to a large model also take time to "prefill."

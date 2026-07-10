@@ -18,7 +18,7 @@ def _patch(monkeypatch, llm_reply: str):
 
 def test_good_cited_answer(monkeypatch):
     _patch(monkeypatch, "Yes. Per Section 903.2.8, a sprinkler system is required for Group R.")
-    res = agent.ask("sprinkler for group R?")
+    res = agent.ask("sprinkler for group R?", building_context="new Group R; sprinklered; 4 stories")
     assert res.mode == "answer"
     assert not res.needs_clarification
     assert res.citations_ok                     # 903.2.8 is in the sources
@@ -33,8 +33,9 @@ def test_clarifying_questions(monkeypatch):
     res = agent.ask("is a sprinkler required?")
     assert res.needs_clarification
     assert res.answer is None
-    assert len(res.clarifying_questions) == 2
-    assert res.chips.get("Sprinklered") == ["Yes", "No"]
+    assert "What is the occupancy/use group?" in res.clarifying_questions
+    assert "Is this new construction, an existing building, or an alteration/change of use?" in res.clarifying_questions
+    assert res.chips.get("Is the building sprinklered?") == ["Sprinklered", "Not sprinklered", "I don't know"]
 
 
 def test_clarifying_json_in_code_fence(monkeypatch):
@@ -74,6 +75,7 @@ def test_low_confidence_auto_flags_review_queue(monkeypatch):
 
 def test_deep_mode_runs_second_retrieval_pass(monkeypatch):
     monkeypatch.setattr(agent.settings, "use_reranker", True)
+    monkeypatch.setattr(agent.settings, "deep_provider", "anthropic")
     calls = []
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
     monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
@@ -84,10 +86,11 @@ def test_deep_mode_runs_second_retrieval_pass(monkeypatch):
 
 def test_deep_mode_without_context_no_second_pass(monkeypatch):
     monkeypatch.setattr(agent.settings, "use_reranker", True)
+    monkeypatch.setattr(agent.settings, "deep_provider", "anthropic")
     calls = []
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
     monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
-    agent.ask("sprinkler?", deep=True)                      # nothing to rewrite -> single retrieval
+    agent.ask("new sprinklered Group R building: sprinkler required?", deep=True)  # specified; no rewrite extra needed
     assert len(calls) == 1
 
 

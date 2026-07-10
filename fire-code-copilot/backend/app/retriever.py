@@ -173,7 +173,32 @@ def _verified_matches(query: str, qvec: list[float], collection: str, k: int = 3
             continue
         meta = {**(m or {}), "verified": True}
         out.append(_format(meta, d))
-    return out
+    if out:
+        return out
+    return _verified_lexical_fallback(query, vcoll, collection, k)
+
+
+def _verified_lexical_fallback(query: str, vcoll, collection: str, k: int) -> list[dict]:
+    """Offline/test safety net and production backstop when vector distance is conservative."""
+    import re
+    def toks(s: str) -> set[str]:
+        raw = re.findall(r"[a-z0-9.]+", (s or "").lower())
+        return {t[:-1] if t.endswith("s") and len(t) > 3 else t for t in raw}
+    q = toks(query)
+    if not q:
+        return []
+    try:
+        got = vcoll.get(where={"edition": collection}, include=["documents", "metadatas"])
+    except Exception:
+        return []
+    scored = []
+    for d, m in zip(got.get("documents", []) or [], got.get("metadatas", []) or []):
+        if not (d or "").strip():
+            continue
+        score = len(q & toks(d)) / max(1, len(q))
+        if score >= 0.35:
+            scored.append((score, _format({**(m or {}), "verified": True}, d)))
+    return [item for _score, item in sorted(scored, key=lambda x: x[0], reverse=True)[:k]]
 
 
 def _merge_amendments(chunks: list[dict], coll) -> list[dict]:

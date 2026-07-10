@@ -4,12 +4,14 @@
 #     pip install -r requirements-local-llm.txt
 # (or just install the single package you need — see below.)
 
-# --- GENERATION_PROVIDER=llamacpp : load a .gguf file directly via llama.cpp ---
+# Deprecated: direct in-process local generation is no longer used by the app runtime.
+# Fire Code CoPilot standardizes on oMLX at LOCAL_BASE_URL instead.
+# --- Former GENERATION_PROVIDER=llamacpp support ---
 # Needs a C/C++ compiler. CPU-only by default. For GPU acceleration, set CMAKE_ARGS before install:
 #     CMAKE_ARGS="-DLLAMA_METAL=on"   pip install llama-cpp-python   # Apple Silicon (Metal)
 #     CMAKE_ARGS="-DLLAMA_CUBLAS=on"  pip install llama-cpp-python   # NVIDIA (CUDA)
 llama-cpp-python
 
-# --- GENERATION_PROVIDER=mlx : load an MLX model directly (Apple Silicon ONLY) ---
+# --- Former GENERATION_PROVIDER=mlx support ---
 # mlx-lm only runs on Apple Silicon (M-series). It is a no-op / unavailable elsewhere.
 mlx-lm

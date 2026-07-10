@@ -16,7 +16,7 @@
 //!
 //! Escape hatches (env vars):
 //!   FCC_ROOT=/path/to/fire-code-copilot   pin the repo root for the dev fallback
-//!   FCC_API_PORT=8000                      backend port (must match the UI's VITE_API_BASE)
+//!   FCC_API_PORT=8001                      backend port (must match the UI's VITE_API_BASE)
 //!   FCC_CODE_BOOKS_DIR=/path/to/pdfs       where the standalone app reads your code books
 //!   FCC_NO_BACKEND=1                       don't spawn a backend (you run one yourself)
 
@@ -190,8 +190,29 @@ fn spawn_backend(app: &tauri::App, port: &str) -> Option<Child> {
     }
 }
 
+/// The workstation defaults to releasing model memory when Fire Code CoPilot quits. Set
+/// `FCC_STOP_OMLX_ON_EXIT=0` only when another local workload intentionally owns oMLX.
+fn stop_omlx_on_exit(value: Option<&str>) -> bool {
+    !matches!(value.map(str::trim), Some("0" | "false" | "False" | "FALSE" | "no" | "No" | "NO"))
+}
+
+/// Ask oMLX to stop through its own managed-service command rather than killing a process by
+/// port. This releases all loaded weights and avoids touching unrelated local processes.
+fn stop_managed_omlx() {
+    if !stop_omlx_on_exit(std::env::var("FCC_STOP_OMLX_ON_EXIT").ok().as_deref()) {
+        eprintln!("[fcc] FCC_STOP_OMLX_ON_EXIT=0 — leaving oMLX running.");
+        return;
+    }
+    let binary = std::env::var("OMLX_BIN").unwrap_or_else(|_| "omlx".to_string());
+    match Command::new(binary).args(["stop", "--timeout", "30"]).output() {
+        Ok(output) if output.status.success() => eprintln!("[fcc] Stopped managed oMLX on exit."),
+        Ok(output) => eprintln!("[fcc] oMLX stop returned {} on exit.", output.status),
+        Err(e) => eprintln!("[fcc] Could not stop oMLX on exit: {e}"),
+    }
+}
+
 pub fn run() {
-    let port = std::env::var("FCC_API_PORT").unwrap_or_else(|_| "8000".to_string());
+    let port = std::env::var("FCC_API_PORT").unwrap_or_else(|_| "8001".to_string());
 
     tauri::Builder::default()
         .manage(Backend::default())
@@ -211,6 +232,20 @@ pub fn run() {
                     let _ = child.kill();
                     let _ = child.wait();
                 }
+                stop_managed_omlx();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stop_omlx_on_exit;
+
+    #[test]
+    fn model_server_stops_on_quit_unless_explicitly_disabled() {
+        assert!(stop_omlx_on_exit(None));
+        assert!(stop_omlx_on_exit(Some("true")));
+        assert!(!stop_omlx_on_exit(Some("0")));
+        assert!(!stop_omlx_on_exit(Some("false")));
+    }
 }

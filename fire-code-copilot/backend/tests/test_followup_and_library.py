@@ -42,7 +42,7 @@ def test_no_history_no_variant(monkeypatch):
     calls = []
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or [CHUNK])
     monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
-    agent.ask("when are sprinklers required?")
+    agent.ask("for a new sprinklered Group R building, when are sprinklers required?")
     assert not calls[0].get("extra_queries")
 
 
@@ -116,6 +116,20 @@ def test_books_list_and_manifest_roundtrip(books_dir, tmp_path, monkeypatch):
 
     books = client.get("/books").json()["books"]
     assert books[0]["in_manifest"] is True and books[0]["collection"] == "test_2021"
+
+
+def test_nested_books_are_listed_and_page_images_work(books_dir):
+    sub = books_dir / "NFPA 1 2022"; sub.mkdir()
+    doc = fitz.open(); page = doc.new_page()
+    page.insert_text((72, 100), "Chapter 10 means of egress.")
+    doc.save(str(sub / "chapter-10.pdf")); doc.close()
+
+    client = TestClient(main.app)
+    books = client.get("/books").json()["books"]
+    assert [b["file"] for b in books] == ["NFPA 1 2022/chapter-10.pdf", "ifc.pdf"]
+    r = client.get("/page-image", params={"source": "NFPA 1 2022/chapter-10.pdf", "page": 1})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
 
 
 def test_ingest_stream_emits_progress_events(books_dir, tmp_path, monkeypatch):
