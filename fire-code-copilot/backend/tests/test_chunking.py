@@ -69,3 +69,19 @@ def test_amendment_markers_are_tagged():
     chunks = chunk_pages(amd_pages, {"book": "CSFSC", "edition": "2022", "is_amendment_doc": True})
     assert chunks and all(c["metadata"]["is_amendment"] for c in chunks)
     assert chunks[0]["metadata"]["section"] == "903.2.8"   # base section preserved for merge
+
+
+def test_connecticut_statute_headings_are_citable_sections():
+    pages = [(1,
+        "CHAPTER 541\n"
+        "Sec. 29-250. Office of the State Fire Marshal. Office of the State Building Inspector.\n"
+        "There is established an Office of the State Fire Marshal.\n"
+        "185 C. 445. Annotation citation, not a statute section.\n"
+        "Sec. 29-252. State Building Code: Adoption, revision and amendments.\n"
+        "The State Building Code shall be adopted and revised as provided by law.\n")]
+    chunks = chunk_pages(pages, {"book": "CGS Chapter 541", "edition": "2025", "is_amendment_doc": False})
+    sections = {c["metadata"]["section"]: c for c in chunks}
+    assert set(sections) >= {"29-250", "29-252"}
+    assert "185" not in sections
+    assert "Office of the State Fire Marshal" in sections["29-250"]["text"]
+    assert sections["29-252"]["metadata"]["page"] == 1

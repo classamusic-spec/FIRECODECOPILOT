@@ -305,10 +305,18 @@ def _save_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2))
 
 
-def ingest(force: bool = False, on_event=None, version_suffix: str | None = None) -> dict:
-    """Index every PDF in the books folder. `on_event`, when given, receives progress dicts
-    ({"type": "start"|"file"|"file_done"|"removed"|"done", ...}) so a UI can show live progress
-    instead of staring at a blocked request."""
+def ingest(force: bool = False, on_event=None, version_suffix: str | None = None,
+           only_files: list[str | Path] | None = None) -> dict:
+    """Index PDFs from the books folder.
+
+    By default every PDF is considered. `only_files` accepts paths relative to the books folder
+    (or absolute paths beneath it) for a targeted, additive ingest. Targeted ingests deliberately
+    do not purge state for other files, which is useful when a newly acquired authority must be
+    indexed without unnecessarily rebuilding a large, previously indexed code library.
+
+    `on_event`, when given, receives progress dicts ({"type": "start"|"file"|"file_done"|
+    "removed"|"done", ...}) so a UI can show live progress instead of staring at a blocked request.
+    """
     import chromadb
 
     def emit(ev: dict) -> None:
@@ -318,8 +326,22 @@ def ingest(force: bool = False, on_event=None, version_suffix: str | None = None
             except Exception:
                 pass  # progress reporting must never break indexing
 
-    books_dir = Path(os.path.expanduser(settings.code_books_dir))
-    pdfs = _pdfs(books_dir)
+    books_dir = Path(os.path.expanduser(settings.code_books_dir)).resolve()
+    all_pdfs = _pdfs(books_dir)
+    if only_files is None:
+        pdfs = all_pdfs
+    else:
+        available = {p.resolve(): p for p in all_pdfs}
+        requested: list[Path] = []
+        for raw in only_files:
+            candidate = Path(raw)
+            candidate = candidate if candidate.is_absolute() else books_dir / candidate
+            candidate = candidate.resolve()
+            if candidate not in available:
+                raise ValueError(f"Requested ingest file is not a PDF inside {books_dir}: {raw}")
+            requested.append(available[candidate])
+        # Preserve first-seen order while ignoring accidental duplicates.
+        pdfs = list(dict.fromkeys(requested))
     if not pdfs:
         return {"error": f"No PDFs found in {books_dir}. Put your code books there."}
     emit({"type": "start", "files": len(pdfs)})
@@ -428,21 +450,22 @@ def ingest(force: bool = False, on_event=None, version_suffix: str | None = None
         emit({"type": "file_done", "file": key, "chunks": len(chunks), "collection": cname})
         print(f"  indexed {key}: {len(chunks)} chunks -> collection '{cname}'")
 
-    # Files DELETED from the books folder: purge their chunks from every collection that holds
-    # them. Without this, removing a book leaves its text permanently retrievable and citable.
-    current = {_book_key(p, books_dir) for p in pdfs}
-    for gone in [name for name in state if name not in current]:
-        for old_cname, files in list(collections_idx.items()):
-            if gone in files:
-                try:
-                    _coll(old_cname).delete(where={"source": gone})
-                except Exception:
-                    pass
-                files.pop(gone, None)
-        state.pop(gone, None)
-        summary.setdefault("removed", []).append(gone)
-        emit({"type": "removed", "file": gone})
-        print(f"  removed {gone}: purged its chunks (file no longer in the books folder)")
+    # Files deleted from the books folder are purged only during a full ingest. A targeted ingest
+    # knows nothing about unrelated source files and must never mistake them for deletions.
+    if only_files is None:
+        current = {_book_key(p, books_dir) for p in all_pdfs}
+        for gone in [name for name in state if name not in current]:
+            for old_cname, files in list(collections_idx.items()):
+                if gone in files:
+                    try:
+                        _coll(old_cname).delete(where={"source": gone})
+                    except Exception:
+                        pass
+                    files.pop(gone, None)
+            state.pop(gone, None)
+            summary.setdefault("removed", []).append(gone)
+            emit({"type": "removed", "file": gone})
+            print(f"  removed {gone}: purged its chunks (file no longer in the books folder)")
 
     _save_json(STATE_FILE, state)
     _save_json(COLLECTIONS_FILE, collections_idx)

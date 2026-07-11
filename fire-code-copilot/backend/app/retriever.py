@@ -6,6 +6,7 @@ amendments so the adopted/amended text is marked as controlling.
 """
 from __future__ import annotations
 from collections import defaultdict
+import re
 from .settings import settings
 from .reranker import rerank
 from . import embeddings  # provider-agnostic embed(); see embeddings.py
@@ -22,6 +23,28 @@ def _client():
 
 def _format(meta: dict, text: str) -> dict:
     return {"text": text, "metadata": meta}
+
+
+# We require at least two digits on both sides: Chapter 541 statutory citations use identifiers such
+# as 29-250, while construction prose commonly contains incidental one-digit hyphenated ratios.
+CITED_HYPHEN_SECTION = re.compile(r"\b\d{2,}[A-Za-z]*-\d{2,}[A-Za-z]*\b")
+
+
+def _explicit_section_matches(coll, query: str) -> list[dict]:
+    sections = list(dict.fromkeys(CITED_HYPHEN_SECTION.findall(query or "")))
+    if not sections:
+        return []
+    out: list[dict] = []
+    for section in sections:
+        try:
+            got = coll.get(where={"section": section}, include=["documents", "metadatas"])
+        except Exception:
+            continue
+        out.extend({"id": _id, "text": doc, "metadata": meta or {}}
+                   for _id, doc, meta in zip(got.get("ids", []) or [],
+                                             got.get("documents", []) or [],
+                                             got.get("metadatas", []) or []))
+    return out
 
 
 def _embedding_dimension_mismatch(error: Exception) -> bool:
@@ -45,6 +68,9 @@ def retrieve_scored(query: str, *, collection: str | None = None,
 
     queries = [query] + [q for q in (extra_queries or []) if q and q.strip()]
     rankings: list[list[dict]] = []      # each entry is one ranked candidate list to fuse
+    explicit_sections = _explicit_section_matches(coll, query)
+    if explicit_sections:
+        rankings.append(explicit_sections)
     primary_qvec = None
     cleared_stale_cache = False
 

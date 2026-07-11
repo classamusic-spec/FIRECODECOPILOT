@@ -24,6 +24,13 @@ import math
 import re
 from collections import defaultdict
 
+# Connecticut General Statutes headings, e.g. "Sec. 29-250. Office of the State Fire Marshal.".
+# Match only at a line start and require the section-number punctuation so an inline cross-reference
+# ("under Sec. 29-250") cannot create a false citation boundary.
+STATUTE_SECTION_HEADING = re.compile(r"^\s*Sec\.\s+(\d+[A-Za-z]*-\d+[A-Za-z]*)\.\s+\S", re.IGNORECASE)
+# Case-reporter citations (e.g. "185 C. 445" or "33 CA 422") can begin a PDF-extracted
+# line; they are authorities in annotations, not code-section headings.
+CASE_REPORTER_CITATION = re.compile(r"^\s*\d{1,4}\s+(?:C\.|CA)\s+\d+")
 # A line that begins a new numbered code section, e.g. "903.2.8 Group R" or "1004.5 Occupant".
 SECTION_HEADING = re.compile(r"^\s*(\d{3,4}(?:\.\d+)*)\s+[A-Z(]")
 # Structural headings. CASE-SENSITIVE on purpose: real headings are "SECTION 903" / "TABLE 509",
@@ -46,6 +53,11 @@ PROSE_MIN_WORDS = 12      # a line this long (or sentence-final) reads as body, 
 def _heading(line: str) -> tuple[str | None, str | None]:
     """Classify a line. Returns (section_number_or_None, kind) where kind is one of
     'numeric' | 'section' | 'chapter' | 'table' | 'appendix' | None."""
+    m = STATUTE_SECTION_HEADING.match(line)
+    if m:
+        return m.group(1), "statute"
+    if CASE_REPORTER_CITATION.match(line):
+        return None, None
     m = SECTION_KEYWORD.match(line)
     if m:
         kw = m.group(1).upper()
