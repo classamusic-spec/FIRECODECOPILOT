@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     code_cycles_config: str = "./config/code_cycles.yaml"
     chroma_dir: str = "./data/chroma"
     active_collection: str = "csfsc_2022"            # set per active edition
+    # Current Connecticut statutes are legally current sources, not part of the adopted-code
+    # collection. The agent routes clearly statutory questions here unless the user selected a
+    # collection explicitly.
+    statutes_collection: str = "ct_general_statutes_chapter_541_2025_2026"
     verified_collection: str = "verified_answers"    # marshal-confirmed answers (learning loop)
     # Max embedding distance for a verified answer to surface as relevant (normalized vectors,
     # L2: 1.0 ≈ cosine 0.5). Chroma always returns the k nearest regardless of how far — without

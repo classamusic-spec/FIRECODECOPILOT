@@ -97,6 +97,22 @@ def _confidence(scored) -> tuple[float | None, str | None]:
     return round(float(top), 3), band
 
 
+# The Chapter 541 collection is a current Connecticut legal authority, not a 2022 adopted-code
+# edition. Route unmistakably statutory questions to it only when the caller did not make a manual
+# library choice. A bare "29-250" is a Connecticut General Statutes citation in this jurisdiction.
+_STATUTORY_QUERY = re.compile(
+    r"(?:\bconnecticut\s+general\s+statutes\b|\bgeneral\s+statutes\s+of\s+connecticut\b|"
+    r"\bc\.?\s*g\.?\s*s\.?\b|(?:\bsec(?:tion)?\.?|§)\s*29-\d{2,}\b|\b29-\d{2,}\b)",
+    re.IGNORECASE,
+)
+
+
+def _effective_collection(question: str, collection: str | None) -> str | None:
+    if collection is not None:
+        return collection
+    return settings.statutes_collection if _STATUTORY_QUERY.search(question or "") else None
+
+
 def _flag_low_confidence(question, answer, sources, building_context, band) -> None:
     """Auto-populate the review queue when an answer is low-confidence (best-effort; never
     breaks answering). This closes the gap-detection loop without the marshal doing anything."""
@@ -173,14 +189,15 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
     # with the literal question (RRF), so "what about existing buildings?" retrieves the topic
     # it refers to. Reranking still scores against the marshal's ORIGINAL wording.
     extra = _history_queries(question, history)
-    active_edition = collection or settings.active_collection
+    effective_collection = _effective_collection(question, collection)
+    active_edition = effective_collection or settings.active_collection
     try:
         precedent = feedback.find_precedent(question, active_edition)
     except Exception:
         precedent = None
     if precedent:
         extra.append(f"{precedent['question']} {precedent['answer']}")
-    scored = retrieve_scored(question, collection=collection, extra_queries=extra or None)
+    scored = retrieve_scored(question, collection=effective_collection, extra_queries=extra or None)
     chunks = [s.chunk for s in scored]
 
     if mode == "retrieve":
@@ -198,7 +215,7 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
     # Deep mode also does a SECOND retrieval pass with a rewritten query (folding in the building
     # context), then reranks the union — not just a model swap.
     if use_deep and (rewrite := _deep_rewrite(question, building_context)):
-        scored = retrieve_scored(question, collection=collection,
+        scored = retrieve_scored(question, collection=effective_collection,
                                  extra_queries=extra + [rewrite])
         chunks = [s.chunk for s in scored]
 
@@ -245,7 +262,7 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
         terms = [f"{question} {building_context}".strip()]
         if check and check.unverified:
             terms.extend(check.unverified)
-        scored = retrieve_scored(question, collection=collection, extra_queries=extra + terms)
+        scored = retrieve_scored(question, collection=effective_collection, extra_queries=extra + terms)
         chunks = [x.chunk for x in scored]
         conf, band = _confidence(scored)
         user = _build_user_block(question, building_context, render_sources(chunks), history=history) + _OUTPUT_PROTOCOL
@@ -289,14 +306,15 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     at the end; otherwise we stream tokens as they arrive.
     """
     extra = _history_queries(question, history)
-    active_edition = collection or settings.active_collection
+    effective_collection = _effective_collection(question, collection)
+    active_edition = effective_collection or settings.active_collection
     try:
         precedent = feedback.find_precedent(question, active_edition)
     except Exception:
         precedent = None
     if precedent:
         extra.append(f"{precedent['question']} {precedent['answer']}")
-    scored = retrieve_scored(question, collection=collection, extra_queries=extra or None)
+    scored = retrieve_scored(question, collection=effective_collection, extra_queries=extra or None)
     chunks = [s.chunk for s in scored]
 
     top_score = max((s.score for s in scored), default=0.0)
@@ -305,7 +323,7 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     use_deep = deep_allowed and (deep or auto_deep)
 
     if use_deep and (rewrite := _deep_rewrite(question, building_context)):
-        scored = retrieve_scored(question, collection=collection,
+        scored = retrieve_scored(question, collection=effective_collection,
                                  extra_queries=extra + [rewrite])
         chunks = [s.chunk for s in scored]
 

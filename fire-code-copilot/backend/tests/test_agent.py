@@ -123,3 +123,23 @@ def test_retrieve_mode_returns_sources_without_generation(monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not generate")))
     res = agent.ask("anything", mode="retrieve")
     assert res.answer is None and len(res.sources) == 1
+
+
+def test_cgs_question_routes_to_current_statutes_without_manual_collection_selection(monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
+
+    agent.ask("What authority does the State Fire Marshal have under Connecticut General Statutes §29-250?",
+              mode="retrieve")
+
+    assert calls[0]["collection"] == "ct_general_statutes_chapter_541_2025_2026"
+
+
+def test_explicit_collection_choice_is_not_overridden_for_cgs_question(monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
+
+    agent.ask("What authority does the State Fire Marshal have under CGS §29-250?", mode="retrieve",
+              collection="csfsc_2022")
+
+    assert calls[0]["collection"] == "csfsc_2022"
