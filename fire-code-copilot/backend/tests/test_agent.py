@@ -135,6 +135,15 @@ def test_cgs_question_routes_to_current_statutes_without_manual_collection_selec
     assert calls[0]["collection"] == "ct_general_statutes_chapter_541_2025_2026"
 
 
+def test_common_statutes_spelling_routes_to_current_statutes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
+
+    agent.ask("What do Connecticut general statues say about the State Fire Marshal?", mode="retrieve")
+
+    assert calls[0]["collection"] == "ct_general_statutes_chapter_541_2025_2026"
+
+
 def test_explicit_collection_choice_is_not_overridden_for_cgs_question(monkeypatch):
     calls = []
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)

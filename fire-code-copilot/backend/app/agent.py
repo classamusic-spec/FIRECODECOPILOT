@@ -101,7 +101,7 @@ def _confidence(scored) -> tuple[float | None, str | None]:
 # edition. Route unmistakably statutory questions to it only when the caller did not make a manual
 # library choice. A bare "29-250" is a Connecticut General Statutes citation in this jurisdiction.
 _STATUTORY_QUERY = re.compile(
-    r"(?:\bconnecticut\s+general\s+statutes\b|\bgeneral\s+statutes\s+of\s+connecticut\b|"
+    r"(?:\bconnecticut\s+(?:general\s+)?statu(?:tes|es)\b|\bgeneral\s+statutes\s+of\s+connecticut\b|"
     r"\bc\.?\s*g\.?\s*s\.?\b|(?:\bsec(?:tion)?\.?|§)\s*29-\d{2,}\b|\b29-\d{2,}\b)",
     re.IGNORECASE,
 )
