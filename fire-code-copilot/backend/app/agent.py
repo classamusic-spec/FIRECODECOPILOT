@@ -25,13 +25,34 @@ PROMPT_PATH = Path(__file__).resolve().parents[2] / "docs" / "AGENT_SYSTEM_PROMP
 # Appended to the user turn so a clarification request comes back in a machine-readable shape
 # without disturbing the markdown ANSWER FORMAT for normal answers.
 _OUTPUT_PROTOCOL = (
-    "\n\nOUTPUT PROTOCOL: If — and only if — you cannot answer safely until the marshal "
-    "supplies decisive building facts, reply with ONLY a JSON object and nothing else:\n"
+    "\n\nOUTPUT PROTOCOL: Search the supplied code excerpts first. Prefer a scoped or conditional "
+    "answer when a missing fact only changes a threshold. Ask for clarification only when no safe "
+    "answer can be given, and ask AT MOST ONE decisive question. If clarification is required, reply "
+    "with ONLY this JSON object and nothing else:\n"
     '{"needs_clarification": true, '
-    '"questions": ["<the few questions that actually change the answer>"], '
-    '"chips": {"Occupancy": ["R-2", "B", "A-2"], "Sprinklered": ["Yes", "No"]}}\n'
-    "The \"chips\" map is optional quick-pick suggestions per question. Otherwise, ignore this "
-    "protocol and answer normally in the ANSWER FORMAT (markdown)."
+    '"questions": ["<one decisive question>"], '
+    '"chips": {"<question>": ["<quick pick>"]}}\n'
+    "The \"chips\" map is optional quick-pick suggestions. Otherwise, answer normally in the "
+    "ANSWER FORMAT (markdown)."
+)
+
+_AFTER_CLARIFICATION_PROTOCOL = (
+    "\n\nThe marshal has already supplied the available follow-up facts. Do not ask another "
+    "clarifying question. Search the supplied excerpts and give the best grounded, conditional "
+    "answer. State any remaining unknown fact as a condition rather than stopping the answer."
+)
+
+_CLARIFICATION_SYSTEM_POLICY = (
+    "\n\nCURRENT APPLICATION POLICY — this overrides the general clarification guidance above: "
+    "retrieved source excerpts are already available for this turn. Give a conditional, grounded "
+    "answer whenever possible. If an answer truly cannot be safely scoped, ask only ONE decisive "
+    "question — never a batch or a follow-up chain."
+)
+
+_AFTER_CLARIFICATION_SYSTEM_POLICY = (
+    "\n\nCURRENT APPLICATION POLICY — a clarification was already collected for this turn. You MUST "
+    "not ask any question or output clarification JSON. Give the best grounded conditional answer "
+    "from the retrieved excerpts now, and explicitly label remaining facts as assumptions."
 )
 
 
@@ -115,7 +136,11 @@ def _determinative_facts(question: str, building_context: str, history: list[dic
     if any(w in question.lower() for w in ("exit", "egress", "occupant")):
         missing(("occupant", "people", "persons", " load"),
                 "What is the occupant load for the space?", ["Under 50", "50–499", "500+", "I don't know"])
-    return qs, chips
+    # Keep the non-streaming/MCP path as lightweight as the UI: one decisive fact at most.
+    if not qs:
+        return [], {}
+    first = qs[0]
+    return [first], {first: chips[first]}
 
 
 def _trace_base(question: str, building_context: str, scored, model: str | None = None) -> dict:
@@ -130,11 +155,12 @@ def _trace_base(question: str, building_context: str, scored, model: str | None 
 def ask(question: str, *, mode: str = "answer", building_context: str = "",
         active_cycle_block: str = "", deep: bool = False,
         provider: str | None = None, generator_model: str | None = None,
-        collection: str | None = None, history: list[dict] | None = None) -> AgentResult:
+        collection: str | None = None, history: list[dict] | None = None,
+        allow_clarification: bool = True) -> AgentResult:
     # Clarify before retrieval when a missing fact changes the governing branch. Retrieve-only is
     # intentionally exempt because callers use it to inspect passages without asking for a ruling.
     missing, chips = _determinative_facts(question, building_context, history)
-    if mode == "answer" and missing:
+    if mode == "answer" and allow_clarification and missing:
         trace = {"interpreted_query": {"normalized_question": " ".join(question.split()), "building_context": building_context,
                                         "facts_used": building_context, "missing_facts": missing},
                  "retrieval": {"dense_terms": [], "bm25_terms": [], "candidates": []}, "reranked": {"chunks": []},
@@ -178,9 +204,11 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
 
     conf, band = _confidence(scored)
 
-    system = _system_prompt(active_cycle_block)
+    system = _system_prompt(active_cycle_block) + _CLARIFICATION_SYSTEM_POLICY
+    if not allow_clarification:
+        system += _AFTER_CLARIFICATION_SYSTEM_POLICY
     user = _build_user_block(question, building_context, render_sources(chunks),
-                             history=history) + _OUTPUT_PROTOCOL
+                             history=history) + (_OUTPUT_PROTOCOL if allow_clarification else _AFTER_CLARIFICATION_PROTOCOL)
 
     # The grounded answer path is oMLX local only. Deep is disabled unless DEEP_PROVIDER is an
     # explicitly configured cloud provider, and runtime generator switching is by model id.
@@ -194,12 +222,17 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
 
     # Did the model ask for clarification instead of answering? Return the questions, not a guess.
     clar = _parse_clarification(draft)
-    if clar is not None:
+    if clar is not None and allow_clarification:
         return AgentResult(mode="answer", answer=None, sources=chunks, citations_ok=True,
                            unverified=[], needs_clarification=True,
                            clarifying_questions=clar.get("questions", []),
                            chips=clar.get("chips", {}) or {}, escalated=use_deep,
                            confidence=conf, confidence_band=band, trace=trace)
+    if clar is not None:
+        # A model can occasionally ignore the post-clarification instruction. Re-prompt once,
+        # rather than returning another chip form and trapping the marshal in a loop.
+        draft = llm.chat(system, user + "\n\nYou already asked the one allowed follow-up. Give the grounded answer now.",
+                         provider=gen_provider, model=model)
 
     # Safety net: verify every cited section actually appears in the retrieved sources. If grounding
     # fails (or retrieval is weak), retry locally with a broadened/section-targeted retrieval pass.
@@ -278,7 +311,7 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
 
     conf, band = _confidence(scored)
 
-    system = _system_prompt(active_cycle_block)
+    system = _system_prompt(active_cycle_block) + _CLARIFICATION_SYSTEM_POLICY
     user = _build_user_block(question, building_context, render_sources(chunks),
                              history=history) + _OUTPUT_PROTOCOL
     gen_provider = settings.deep_provider if use_deep else "local"
@@ -371,7 +404,18 @@ def _parse_clarification(draft: str) -> dict | None:
         obj = json.loads(s)
     except (ValueError, json.JSONDecodeError):
         return None
-    return obj if obj.get("needs_clarification") is True else None
+    if obj.get("needs_clarification") is not True:
+        return None
+    # The UI has a single, deterministic continuation route. Trim a model-produced batch to
+    # one question so it cannot create a question-at-a-time loop.
+    questions = [str(q).strip() for q in (obj.get("questions") or []) if str(q).strip()]
+    if not questions:
+        return None
+    question = questions[0]
+    all_chips = obj.get("chips") if isinstance(obj.get("chips"), dict) else {}
+    options = all_chips.get(question)
+    chips = {question: options} if isinstance(options, list) else {}
+    return {"questions": [question], "chips": chips}
 
 
 # Follow-up memory bounds: how many prior exchanges inform the prompt, and how much of each

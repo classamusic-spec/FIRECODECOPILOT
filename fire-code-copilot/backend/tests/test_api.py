@@ -50,3 +50,4 @@ def test_clarify_folds_answers_into_context(client, monkeypatch):
                                       "building_context": "Group R-2", "answers": "Sprinklered: No"})
     assert r.status_code == 200
     assert "Group R-2" in captured["building_context"] and "Sprinklered: No" in captured["building_context"]
+    assert captured["allow_clarification"] is False

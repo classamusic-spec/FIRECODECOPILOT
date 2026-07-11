@@ -9,6 +9,7 @@ from collections import defaultdict
 from .settings import settings
 from .reranker import rerank
 from . import embeddings  # provider-agnostic embed(); see embeddings.py
+from . import embed_cache  # clears stale vectors when an embedding model/cache changed
 from . import lexical     # BM25 channel for exact-token matches
 from .sections import relates
 from .query import expand_query
@@ -21,6 +22,12 @@ def _client():
 
 def _format(meta: dict, text: str) -> dict:
     return {"text": text, "metadata": meta}
+
+
+def _embedding_dimension_mismatch(error: Exception) -> bool:
+    """Chroma's wording is stable across its Python and Rust clients."""
+    message = str(error).lower()
+    return "embedding" in message and "dimension" in message and "got" in message
 
 
 def retrieve(query: str, *, collection: str | None = None) -> list[dict]:
@@ -39,15 +46,27 @@ def retrieve_scored(query: str, *, collection: str | None = None,
     queries = [query] + [q for q in (extra_queries or []) if q and q.strip()]
     rankings: list[list[dict]] = []      # each entry is one ranked candidate list to fuse
     primary_qvec = None
+    cleared_stale_cache = False
 
     for i, q in enumerate(queries):
         # Embed the EXPANDED query (occupancy codes/acronyms spelled out) for recall.
         expanded = expand_query(q)
         qvec = embeddings.embed([expanded], input_type="query")[0]
+        try:
+            res = coll.query(query_embeddings=[qvec], n_results=settings.retrieve_before_rerank,
+                             include=["documents", "metadatas"])
+        except Exception as exc:
+            # The cached vector may predate the current embedding model/collection. Clear it and
+            # regenerate once; otherwise the stale query vector permanently blocks every search.
+            if cleared_stale_cache or not _embedding_dimension_mismatch(exc):
+                raise
+            embed_cache.clear()
+            cleared_stale_cache = True
+            qvec = embeddings.embed([expanded], input_type="query")[0]
+            res = coll.query(query_embeddings=[qvec], n_results=settings.retrieve_before_rerank,
+                             include=["documents", "metadatas"])
         if i == 0:
             primary_qvec = qvec
-        res = coll.query(query_embeddings=[qvec], n_results=settings.retrieve_before_rerank,
-                         include=["documents", "metadatas"])
         ids = res.get("ids", [[]])[0]
         docs = res.get("documents", [[]])[0]
         metas = res.get("metadatas", [[]])[0]

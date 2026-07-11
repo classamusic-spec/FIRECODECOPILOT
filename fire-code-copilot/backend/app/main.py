@@ -187,7 +187,7 @@ def clarify(req: ClarifyRequest):
     return _http_errors(lambda: result_dict(agent_ask(
         req.question, building_context=ctx, active_cycle_block=active_cycle_block(),
         deep=req.deep, provider=req.provider, generator_model=req.generator_model,
-        collection=req.collection, history=_hist(req))))
+        collection=req.collection, history=_hist(req), allow_clarification=False)))
 
 
 @app.post("/ingest")

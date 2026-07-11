@@ -52,13 +52,15 @@ export default function ClarifyingChips({
     return parts.join("; ");
   }, [categories, selected, freeText]);
 
-  const canContinue = answers.length > 0 && !busy;
+  // Continue is deliberately available without a selection: the backend will search and provide
+  // a conditional answer rather than making the marshal complete another question loop.
+  const canContinue = !busy;
 
   return (
     <div className="rounded-xl border border-coral-500/30 bg-coral-500/[0.06] p-4">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-coral-300">
         <span className="h-1.5 w-1.5 rounded-full bg-coral-500" />
-        A few details change the answer
+        One detail may change the answer
       </p>
 
       {questions.length > 0 && (
@@ -125,7 +127,7 @@ export default function ClarifyingChips({
           disabled={!canContinue}
           className="rounded-lg bg-coral-500 px-4 py-2 text-sm font-semibold text-white shadow-glow transition active:scale-95 hover:bg-coral-400 disabled:cursor-not-allowed disabled:bg-steel-700 disabled:text-steel-500 disabled:shadow-none disabled:active:scale-100"
         >
-          {busy ? "Working…" : "Continue"}
+          {busy ? "Searching…" : "Search code now"}
         </button>
         {answers && <span className="font-mono text-xs text-steel-400">{answers}</span>}
       </div>

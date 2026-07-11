@@ -33,15 +33,37 @@ def test_clarifying_questions(monkeypatch):
     res = agent.ask("is a sprinkler required?")
     assert res.needs_clarification
     assert res.answer is None
-    assert "What is the occupancy/use group?" in res.clarifying_questions
-    assert "Is this new construction, an existing building, or an alteration/change of use?" in res.clarifying_questions
-    assert res.chips.get("Is the building sprinklered?") == ["Sprinklered", "Not sprinklered", "I don't know"]
+    assert res.clarifying_questions == ["What is the occupancy/use group?"]
+    assert res.chips == {"What is the occupancy/use group?": ["B", "F-1", "F-2", "R-2", "Mixed-use"]}
 
 
 def test_clarifying_json_in_code_fence(monkeypatch):
     _patch(monkeypatch, '```json\n{"needs_clarification": true, "questions": ["Occupancy?"]}\n```')
     res = agent.ask("requirements?")
     assert res.needs_clarification and res.clarifying_questions == ["Occupancy?"]
+
+
+def test_clarification_parser_keeps_only_one_decisive_question():
+    parsed = agent._parse_clarification(
+        '{"needs_clarification": true, "questions": ["Occupancy?", "Sprinklered?"], '
+        '"chips": {"Occupancy?": ["F-1"], "Sprinklered?": ["Yes", "No"]}}'
+    )
+    assert parsed == {"questions": ["Occupancy?"], "chips": {"Occupancy?": ["F-1"]}}
+
+
+def test_answer_after_clarification_bypasses_another_clarification_round(monkeypatch):
+    """Continue must retrieve and answer, even when some facts remain unknown."""
+    _patch(monkeypatch, "For the described existing factory building, see Section 903.2.8.")
+    retrievals = []
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: retrievals.append(q) or SOURCES)
+    res = agent.ask(
+        "what is required for standpipe systems at a factory building?",
+        building_context="Existing; 1–3 stories",
+        allow_clarification=False,
+    )
+    assert retrievals == ["what is required for standpipe systems at a factory building?"]
+    assert not res.needs_clarification
+    assert res.answer and "903.2.8" in res.answer
 
 
 def test_refuses_to_fabricate(monkeypatch):
