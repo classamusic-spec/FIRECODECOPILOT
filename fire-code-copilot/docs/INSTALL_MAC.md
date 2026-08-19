@@ -36,7 +36,7 @@ talks to the model over a local URL and reads the books from the folder you poin
 
 ## Step 1 — Prerequisites
 - **Python 3.11+**: `python3 --version` (install via [python.org] or `brew install python` if needed).
-- **oMLX running on `http://localhost:8000/v1`.** It serves the two switchable generators,
+- **oMLX running on `http://localhost:8010/v1`.** It serves the two switchable generators,
   BGE-M3 embeddings, reranker, and OCR models through one OpenAI-compatible endpoint.
 
 ## Step 2 — Get the project + install deps
@@ -57,7 +57,7 @@ cp .env.example .env
 Open `.env` and set:
 ```
 GENERATION_PROVIDER=local
-LOCAL_BASE_URL=http://localhost:8000/v1
+LOCAL_BASE_URL=http://localhost:8010/v1
 GENERATOR_MODEL=mlx-community/gemma-4-26b-a4b-it-4bit
 GENERATOR_MODELS=mlx-community/gemma-4-26b-a4b-it-4bit,lmstudio-community/granite-4.0-h-small-MLX-4bit
 MLX_THINKING=off
@@ -123,7 +123,7 @@ curl -s localhost:8001/ask -H 'Content-Type: application/json' \
 
 ## Troubleshooting
 - **"Connection refused" / errors on ask** → oMLX isn't running, or `LOCAL_BASE_URL`
-  is wrong. Confirm oMLX is serving on `http://localhost:8000/v1`.
+  is wrong. Confirm oMLX is serving on `http://localhost:8010/v1`.
 - **"collection does not exist"** → run `python -m app.ingest` first.
 - **Slow first answer** → the local embedding/reranker models load on first use; subsequent
   questions are fast. Big-context prompts to a large model also take time to "prefill."

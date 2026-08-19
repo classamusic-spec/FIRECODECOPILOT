@@ -6,7 +6,7 @@ Fire Code CoPilot is standardized on **one local OpenAI-compatible oMLX endpoint
 
 ```env
 GENERATION_PROVIDER=local
-LOCAL_BASE_URL=http://localhost:8000/v1
+LOCAL_BASE_URL=http://localhost:8010/v1
 GENERATOR_MODEL=granite-4.0-h-small-MLX-8bit
 GENERATOR_MODELS=granite-4.0-h-small-MLX-8bit,gemma-4-26b-a4b-it-4bit,Ornith-1.0-35B-bf16
 MLX_THINKING=off
@@ -87,7 +87,7 @@ Recommended local layout:
 
 | Service | URL |
 |---|---|
-| oMLX model runtime | `http://localhost:8000/v1` |
+| oMLX model runtime | `http://localhost:8010/v1` |
 | Fire Code CoPilot backend API | `http://localhost:8001` |
 | Vite frontend | `http://localhost:5173` |
 

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # "local" = the one OpenAI-compatible oMLX endpoint at LOCAL_BASE_URL.
     # The answer path never uses in-process MLX/GGUF or a local reasoning/deep model.
     generation_provider: str = "local"
-    local_base_url: str = "http://localhost:8000/v1"
+    local_base_url: str = "http://localhost:8010/v1"
     local_api_key: str = "not-needed"                 # local oMLX bearer token, if configured
     generator_model: str = "granite-4.0-h-small-MLX-8bit"
     generator_models: str = "granite-4.0-h-small-MLX-8bit,gemma-4-26b-a4b-it-4bit,Ornith-1.0-35B-bf16"

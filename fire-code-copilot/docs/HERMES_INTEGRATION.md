@@ -41,7 +41,7 @@ oMLX endpoint configured by `.env`.
 provider: custom
 model:
   default: your-orchestrator-model
-  base_url: http://localhost:8000/v1
+  base_url: http://localhost:8010/v1
   context_length: 131072
 ```
 
