@@ -73,3 +73,35 @@ def test_reingest_purges_stale_vectors(tmp_path, monkeypatch):
     docs_v2 = coll.get(include=["documents"])["documents"]
     assert any("BETATOKEN" in d for d in docs_v2), "new content should be indexed"
     assert not any("ALPHATOKEN" in d for d in docs_v2), "stale prior text must be purged on re-ingest"
+
+
+def test_targeted_forced_reingest_preserves_unrelated_vectors(tmp_path, monkeypatch):
+    import chromadb
+    from app.settings import settings
+
+    books = tmp_path / "books"; books.mkdir()
+    data = tmp_path / "data"
+    monkeypatch.setattr(settings, "code_books_dir", str(books))
+    monkeypatch.setattr(settings, "data_dir", str(data))
+    monkeypatch.setattr(settings, "chroma_dir", str(data / "chroma"))
+    monkeypatch.setattr(settings, "active_collection", "targeted")
+    monkeypatch.setattr(settings, "extract_tables", False)
+    monkeypatch.setattr(ingest, "STATE_FILE", data / "ingest_state.json")
+    monkeypatch.setattr(ingest, "COLLECTIONS_FILE", data / "collections.json")
+
+    target = books / "target.pdf"
+    unrelated = books / "unrelated.pdf"
+    _section_pdf(target, "OLDTARGET provision text that will be replaced during the targeted ingest.")
+    _section_pdf(unrelated, "KEEPTHIS unrelated provision text that must survive the targeted ingest.")
+    ingest.ingest()
+
+    _section_pdf(target, "NEWTARGET replacement provision text for the targeted source only.")
+    result = ingest.ingest(force=True, only_files=["target.pdf"])
+
+    coll = chromadb.PersistentClient(path=settings.chroma_dir).get_collection("targeted")
+    docs = coll.get(include=["documents"])["documents"] or []
+    assert result["chunks_added"] == 1
+    assert any("NEWTARGET" in d for d in docs)
+    assert any("KEEPTHIS" in d for d in docs)
+    assert not any("OLDTARGET" in d for d in docs)
+    assert coll.count() == 2

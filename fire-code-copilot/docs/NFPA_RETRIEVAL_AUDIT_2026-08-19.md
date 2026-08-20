@@ -88,23 +88,25 @@ Official status source:
 
 ## Final index reconciliation
 
-The targeted rebuild exited successfully. The stable post-run collection contains **45,353 chunks**
-from **317 adopted-code sources**. Ingestion state contains 319 sources because two tracked General
-Statutes sources live in the separate statutes collection. The active manifest contains 320 PDFs;
-the remaining active document is the known image-only `Plan Review Check list.pdf` scan.
+The August 20 targeted refresh replaced exactly **45 NFPA 101 PDFs** and retained **7,980 NFPA
+101 chunks** at 1024 dimensions. Every refreshed chunk now carries `code_family=nfpa:101`, and the
+45 per-source counts match the pre-refresh vector backup exactly.
 
-| Indexed family | Chunks |
-|---|---:|
-| NFPA 101-2021 | 7,980 |
-| NFPA 1-2021 | 10,756 |
-| NFPA 96-2021 | 738 |
-| IFC-2021 | 5,674 |
-| IBC-2021 Code and Commentary | 7,369 |
-| NFPA 13-2019 | 1,735 per indexed copy |
-| NFPA 14-2019 | 162 |
-| NFPA 20-2019 | 497 |
-| NFPA 25-2020 | 496 |
-| NFPA 72-2019 | 1,185 |
+The first targeted command exposed a force-scope defect: `force=True` recreated an entire collection
+even when `only_files` was supplied. The operation was not accepted as complete. The force/reset
+branch was restricted to full-corpus ingests, a regression now proves that unrelated vectors survive
+a targeted forced reindex, and a complete retained-source reconciliation restored the corpus.
+
+The reconciled physical and tracked catalogs now agree:
+
+| Collection | Physical chunks | Tracked chunks | Indexed sources |
+|---|---:|---:|---:|
+| `csfsc_2022` | 74,397 | 74,397 | 317 |
+| `ct_general_statutes_chapter_541_2025_2026` | 367 | 367 | 2 |
+
+The active manifest contains 320 PDFs. The remaining source is the known image-only
+`Plan Review Check list.pdf` scan. The pre-refresh NFPA 101 slice remains available in the isolated
+`csfsc_2022_nfpa101_backup_20260820` backup collection.
 
 ## Verification
 
@@ -114,7 +116,7 @@ the remaining active document is the known image-only `Plan Review Check list.pd
 - Hot-work retrieval ranked NFPA 1 Chapter 41 first.
 - Explicit NFPA 13 and NFPA 96 queries ranked the requested standards first.
 - Connecticut Part IV amendment queries ranked the Connecticut Fire Safety Code amendment layer.
-- Backend: **203 passed, 1 skipped**.
+- Backend: **204 passed, 1 skipped**.
 - Frontend TypeScript typecheck and production build: passed.
 - `git diff --check` and the added-line security scan: clean.
 

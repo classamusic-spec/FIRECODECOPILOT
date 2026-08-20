@@ -363,8 +363,12 @@ def ingest(force: bool = False, on_event=None, version_suffix: str | None = None
     collections_idx = _load_json(COLLECTIONS_FILE)   # cumulative: {collection: {file: {...}}}
     client = chromadb.PersistentClient(path=settings.chroma_dir)
 
-    if force:
-        # A forced ingest must recreate collections, not just overwrite rows. Chroma fixes a
+    # `force=True` means two different things depending on scope: a full-corpus forced ingest
+    # intentionally recreates collections for an embedding/schema migration, while a targeted
+    # forced ingest must only replace the requested sources. Never delete an entire collection
+    # when `only_files` is present.
+    if force and only_files is None:
+        # A full forced ingest must recreate collections, not just overwrite rows. Chroma fixes a
         # collection's embedding dimension at first insert; switching from the old 384-dim local
         # embedder to oMLX/BGE-M3's 1024-dim vectors otherwise fails with a dimension mismatch.
         target_collections = {_collection_name(settings.active_collection, version_suffix), *collections_idx.keys()}
