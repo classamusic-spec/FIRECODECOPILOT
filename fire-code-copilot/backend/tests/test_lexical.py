@@ -6,15 +6,16 @@ class FakeColl:
     """Minimal stand-in for a Chroma collection (BM25 only needs name/count/get)."""
     name = "t"
 
-    def __init__(self, docs):
+    def __init__(self, docs, metas=None):
         self._docs = docs
         self._ids = [str(i) for i in range(len(docs))]
+        self._metas = metas or [{} for _ in docs]
 
     def count(self):
         return len(self._docs)
 
     def get(self, include=None):
-        return {"ids": self._ids, "documents": self._docs, "metadatas": [{} for _ in self._docs]}
+        return {"ids": self._ids, "documents": self._docs, "metadatas": self._metas}
 
 
 DOCS = [
@@ -45,3 +46,59 @@ def test_tokenizer_keeps_dotted_sections():
 
 def test_no_match_returns_empty():
     assert lexical.search(FakeColl(DOCS), "zzzzqqq nonexistent", k=3) == []
+
+
+def test_book_metadata_makes_explicit_nfpa_book_searchable():
+    docs = [
+        "Existing apartment occupancy requirements.",
+        "Generic fire safety requirements.",
+        "Unrelated building permit checklist.",
+    ]
+    metas = [
+        {"book": "NFPA 101 2021 — Life Safety Code, Chapter 31", "source": "nfpa101/ch31.pdf"},
+        {"book": "Unrelated local checklist", "source": "checklist.pdf"},
+        {"book": "Another unrelated source", "source": "permits.pdf"},
+    ]
+    res = lexical.search(FakeColl(docs, metas), "NFPA 101", k=2)
+    assert res and res[0]["metadata"]["book"].startswith("NFPA 101")
+
+
+def test_large_chroma_collection_is_loaded_in_pages():
+    class FakePagedColl(FakeColl):
+        name = "large-paged"
+
+        def get(self, include=None, limit=None, offset=None):
+            assert limit is not None, "large collections must not use an unbounded Chroma get()"
+            start = offset or 0
+            stop = start + limit
+            return {
+                "ids": self._ids[start:stop],
+                "documents": self._docs[start:stop],
+                "metadatas": self._metas[start:stop],
+            }
+
+    docs = ["generic requirements"] * 5000 + ["unique kitchen exhaust requirement"]
+    metas = [{} for _ in docs]
+    result = lexical.search(FakePagedColl(docs, metas), "unique kitchen exhaust", k=1)
+    assert result and result[0]["text"] == "unique kitchen exhaust requirement"
+
+
+def test_same_count_external_store_revision_rebuilds_metadata_index(monkeypatch):
+    revisions = iter([(1, 0), (2, 0)])
+    monkeypatch.setattr(lexical, "_store_revision", lambda: next(revisions))
+
+    class CountingColl(FakeColl):
+        name = "same-count-revision"
+
+        def __init__(self):
+            super().__init__(["requirements"], [{"book": "NFPA 1"}])
+            self.get_calls = 0
+
+        def get(self, include=None):
+            self.get_calls += 1
+            return super().get(include=include)
+
+    coll = CountingColl()
+    lexical._index_for(coll)
+    lexical._index_for(coll)
+    assert coll.get_calls == 2

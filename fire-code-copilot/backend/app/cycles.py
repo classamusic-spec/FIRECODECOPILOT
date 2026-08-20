@@ -8,8 +8,8 @@ from .settings import settings
 
 
 def _load() -> dict:
-    """Load the finalized code_cycles.yaml; if the marshal hasn't created it yet, fall back to
-    the committed .example so the app still runs (with VERIFY-me placeholder editions)."""
+    """Load the local cycle config; fall back to the committed authoritative example so a fresh
+    installation has the same adopted-code applicability guidance."""
     path = Path(settings.code_cycles_config)
     if not path.exists():
         example = path.with_name("code_cycles.example.yaml")
@@ -27,6 +27,12 @@ def active_cycle_block() -> str:
     for d in act.get("documents", []):
         lines.append(f"  - {d.get('title')} — CT edition {d.get('ct_edition')} "
                      f"(base: {d.get('base_model_code','?')})")
+        if d.get("applies_to"):
+            lines.append(f"    Applies to: {d['applies_to']}")
+    rules = act.get("applicability_rules") or []
+    if rules:
+        lines.append("  Connecticut applicability rules:")
+        lines.extend(f"    - {rule}" for rule in rules)
     warn = cycle_reminder(cfg)
     if warn:
         lines.append(f"  ⚠️ {warn}")
@@ -37,6 +43,13 @@ def cycle_reminder(cfg: dict | None = None) -> str | None:
     """Return a warning string if a new cycle is imminent/overdue, else None."""
     cfg = cfg or _load()
     pend = cfg.get("pending_cycle") or {}
+    if str(pend.get("status", "")).lower() == "delayed":
+        note = str(pend.get("notes") or "").strip()
+        if note:
+            return f"{pend.get('label','New cycle')} is delayed. {note}"
+        return (f"{pend.get('label','New cycle')} is delayed pending state approval. Continue using "
+                "the active code cycle until CT DAS publishes an approved effective date; then "
+                "update the code books + config/code_cycles.yaml and re-run ingestion.")
     exp = pend.get("expected_effective_date")
     if not exp:
         return None

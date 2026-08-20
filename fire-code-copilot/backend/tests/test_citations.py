@@ -49,3 +49,59 @@ def test_fabricated_quote_is_flagged():
     assert not check.ok                     # section is real but the quote is invented
     assert check.unverified_quotes
     assert "UNVERIFIED QUOTE" in citations.annotate("…", check)
+
+
+def test_nfpa_standard_name_verifies_from_source_book_metadata():
+    sources = [{
+        "text": "The requirements of this chapter apply to existing apartment occupancies.",
+        "metadata": {
+            "section": "31.1.1.1",
+            "book": "NFPA 101 2021 — Life Safety Code, Chapter 31",
+            "edition": "2021",
+            "page": 1,
+        },
+    }]
+    check = citations.validate("Use NFPA 101 §31.1.1.1 for this existing building.", sources)
+    assert check.ok
+    assert "NFPA 101" in check.verified
+
+
+def test_different_nfpa_standard_is_not_verified_by_book_metadata():
+    sources = [{
+        "text": "The requirements of this chapter apply to existing apartment occupancies.",
+        "metadata": {"section": "31.1.1.1", "book": "NFPA 101 Life Safety Code"},
+    }]
+    check = citations.validate("NFPA 999 applies.", sources)
+    assert not check.ok
+    assert check.unverified == ["NFPA 999"]
+
+
+def test_annex_citation_is_checked_against_annex_section_metadata():
+    sources = [{"text": "Explanatory material.", "metadata": {
+        "section": "A.31.1.1", "book": "NFPA 101 Life Safety Code"}}]
+    assert citations.validate("See NFPA 101 §A.31.1.1.", sources).ok
+    bad = citations.validate("See NFPA 101 §A.999.9.", sources)
+    assert not bad.ok
+    assert any("A.999.9" in item for item in bad.unverified)
+
+
+def test_nfpa_standard_and_section_must_come_from_the_same_source_book():
+    sources = [
+        {"text": "Life Safety Code material.", "metadata": {
+            "section": "7.1", "book": "NFPA 101 Life Safety Code"}},
+        {"text": "Fire Code material.", "metadata": {
+            "section": "31.1.1.1", "book": "NFPA 1 Fire Code"}},
+    ]
+    check = citations.validate("NFPA 101 §31.1.1.1 applies.", sources)
+    assert not check.ok
+    assert any("31.1.1.1" in item for item in check.unverified)
+
+
+def test_nfpa_standard_and_section_pair_verifies_from_same_book_chunk():
+    sources = [{"text": "Existing apartment requirements.", "metadata": {
+        "section": "31.1.1.1", "book": "NFPA 101 Life Safety Code"}}]
+    assert citations.validate("NFPA 101, Section 31.1.1.1 applies.", sources).ok
+
+
+def test_short_decimal_measurement_is_not_mistaken_for_a_bare_nfpa_citation():
+    assert citations.extract_citations("Maintain a clearance of 1.5 inches.") == []

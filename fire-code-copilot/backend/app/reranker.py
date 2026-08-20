@@ -76,7 +76,16 @@ def rerank(query: str, chunks: list[dict], top_k: int | None = None) -> list[Sco
         return []
     if not settings.use_reranker:
         return [Scored(c, 0.0) for c in chunks[:top_k]]
-    docs = [c["text"] for c in chunks]
+    # Provenance labels are retrieval evidence too. Chapter-split standards often omit their book
+    # title from every body chunk; without metadata the cross-encoder can rank semantically similar
+    # text from the wrong code above the book the marshal explicitly named. The original chunks stay
+    # untouched and are still what the generator receives.
+    docs = []
+    for chunk in chunks:
+        meta = chunk.get("metadata", {}) or {}
+        label = (f"[Book: {meta.get('book', '')}; Section: {meta.get('section', '')}; "
+                 f"Source: {meta.get('source', '')}]")
+        docs.append(f"{label}\n{chunk['text']}")
     resp = _post_rerank(query, docs, min(len(docs), max(top_k, settings.keep_after_rerank)))
     ranked = _parse_ranked(resp, chunks)
     _ready = True

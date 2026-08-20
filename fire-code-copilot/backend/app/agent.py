@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .settings import settings
 from . import llm, citations, audit, feedback
+from .applicability import original_permit_period
 from .retriever import retrieve_scored, render_sources
 
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "docs" / "AGENT_SYSTEM_PROMPT.md"
@@ -136,13 +137,24 @@ def _determinative_facts(question: str, building_context: str, history: list[dic
     def missing(patterns, label, options):
         if not any(p in combined for p in patterns):
             qs.append(label); chips[label] = options
-    code_words = ("exit", "egress", "standpipe", "sprinkler", "fire alarm", "occupant load", "height", "story")
+    code_words = ("exit", "egress", "standpipe", "sprinkler", "fire alarm", "occupant load", "height", "story",
+                  "apply", "applicable")
     if not any(w in question.lower() for w in code_words):
         return [], {}
     missing(("group ", "occupancy", "factory", "business", "assembly", "residential", "r-", "f-", "b occupancy"),
             "What is the occupancy/use group?", ["B", "F-1", "F-2", "R-2", "Mixed-use"])
     missing(("new", "existing", "alteration", "addition", "change of occupancy", "change of use"),
             "Is this new construction, an existing building, or an alteration/change of use?", ["New", "Existing", "Alteration", "Change of use"])
+    # Connecticut's Part III/Part IV branch turns on the ORIGINAL permit date, not simply whether
+    # the building is old today. Once the user has identified an existing building, ask this before
+    # secondary threshold facts. Merely mentioning NFPA 101 is not proof that Part IV applies.
+    permit_period = (original_permit_period(building_context, allow_bare_cutoff=True)
+                     or original_permit_period(combined))
+    if (any(term in combined for term in ("existing", "older building", "old building"))
+            and permit_period is None):
+        label = "Was the original building permit issued before January 1, 2006?"
+        qs.append(label)
+        chips[label] = ["Before Jan. 1, 2006", "Jan. 1, 2006 or later", "I don't know"]
     if any(w in question.lower() for w in ("exit", "egress", "standpipe", "sprinkler", "height", "story")):
         missing(("sprinklered", "sprinklered", "not sprinklered", "without sprinklers"),
                 "Is the building sprinklered?", ["Sprinklered", "Not sprinklered", "I don't know"])
@@ -187,8 +199,12 @@ def ask(question: str, *, mode: str = "answer", building_context: str = "",
 
     # Follow-up memory: a context-carrying query variant built from the previous question, fused
     # with the literal question (RRF), so "what about existing buildings?" retrieves the topic
-    # it refers to. Reranking still scores against the marshal's ORIGINAL wording.
+    # it refers to. Reranking receives both the original wording and expanded context.
     extra = _history_queries(question, history)
+    if context_query := _deep_rewrite(question, building_context):
+        # Building facts are retrieval facts, not only prompt facts. In Connecticut the original
+        # permit year can switch the governing base book between Part III/IFC and Part IV/NFPA 101.
+        extra.append(context_query)
     effective_collection = _effective_collection(question, collection)
     active_edition = effective_collection or settings.active_collection
     try:
@@ -305,7 +321,16 @@ def ask_stream(question: str, *, building_context: str = "", active_cycle_block:
     clarification JSON, so we buffer silently (never stream raw JSON to the UI) and resolve it
     at the end; otherwise we stream tokens as they arrive.
     """
+    missing, chips = _determinative_facts(question, building_context, history)
+    if missing:
+        yield {"type": "clarify", "clarifying_questions": missing, "chips": chips,
+               "escalated": False, "confidence": None, "confidence_band": None}
+        yield {"type": "done"}
+        return
+
     extra = _history_queries(question, history)
+    if context_query := _deep_rewrite(question, building_context):
+        extra.append(context_query)
     effective_collection = _effective_collection(question, collection)
     active_edition = effective_collection or settings.active_collection
     try:

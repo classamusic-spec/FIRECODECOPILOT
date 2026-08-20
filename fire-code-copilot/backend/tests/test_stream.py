@@ -22,13 +22,35 @@ def _patch_stream(monkeypatch, deltas):
 
 def test_streams_tokens_then_meta(monkeypatch):
     _patch_stream(monkeypatch, ["Per ", "§903.2.8", ", a sprinkler system is required."])
-    events = list(agent.ask_stream("sprinkler for R?"))
+    events = list(agent.ask_stream("Explain Section 903.2.8"))
     types = [e["type"] for e in events]
     assert types[0] == "token" and "meta" in types and types[-1] == "done"
     text = "".join(e["text"] for e in events if e["type"] == "token")
     assert "903.2.8" in text
     meta = next(e for e in events if e["type"] == "meta")
     assert meta["citations_ok"] and len(meta["sources"]) == 1
+
+
+def test_stream_retrieval_includes_original_permit_context(monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
+    monkeypatch.setattr(agent.llm, "chat_stream", lambda *a, **k: iter(["Per §903.2.8, yes."]))
+    list(agent.ask_stream(
+        "What egress rules apply?",
+        building_context=("Existing R-2; originally permitted in 1995; sprinklered; "
+                          "3 stories; occupant load 40"),
+    ))
+    assert any("permitted in 1995" in q for q in calls[0].get("extra_queries", []))
+
+
+def test_stream_asks_original_permit_date_before_retrieval(monkeypatch):
+    monkeypatch.setattr(agent, "retrieve_scored", lambda *a, **k: pytest.fail("retrieval should wait"))
+    events = list(agent.ask_stream(
+        "What egress rules apply to this existing R-2 apartment building?",
+        building_context="Existing R-2; sprinklered; 3 stories; occupant load 40",
+    ))
+    assert [event["type"] for event in events] == ["clarify", "done"]
+    assert "original building permit" in events[0]["clarifying_questions"][0]
 
 
 def test_clarification_is_not_streamed_as_tokens(monkeypatch):

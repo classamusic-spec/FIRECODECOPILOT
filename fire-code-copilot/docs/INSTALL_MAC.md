@@ -78,11 +78,18 @@ only reads them.
 ### Optional but recommended: label your books
 Create `CodeBooks/books.yaml` so editions and Connecticut amendments are tagged correctly:
 ```yaml
-"2022_CSFSC.pdf":        { book: "CSFSC", edition: "2022", is_amendment_doc: false }
-"CT_Amendments_IFC.pdf": { book: "CSFSC", edition: "2022", is_amendment_doc: true }
-"NFPA_13_2022.pdf":      { book: "NFPA 13", edition: "2022", is_amendment_doc: false }
+"2022_CSFSC.pdf":        { book: "CSFSC", edition: "2022", is_amendment_doc: true }
+"2021_IFC.pdf":           { book: "International Fire Code", edition: "2021", is_amendment_doc: false }
+"NFPA_101_2021.pdf":      { book: "NFPA 101 Life Safety Code", edition: "2021", is_amendment_doc: false }
+"NFPA_1_2021.pdf":        { book: "NFPA 1 Fire Code", edition: "2021", is_amendment_doc: false }
+"2022_CSBC.pdf":          { book: "Connecticut State Building Code", edition: "2022", is_amendment_doc: true }
+"2021_IBC.pdf":           { book: "International Building Code", edition: "2021", is_amendment_doc: false }
+"2021_IEBC.pdf":          { book: "International Existing Building Code", edition: "2021", is_amendment_doc: false }
+"NFPA_13_2019.pdf":       { book: "NFPA 13", edition: "2019", is_amendment_doc: false }
 ```
-Without it, the app infers book/edition from filenames and guesses amendment docs by name.
+For Connecticut's active 2022 cycle, keep both the Connecticut amendment documents and their
+adopted base books. The app cannot answer from a base code that is named by the State but absent
+from the corpus.
 
 ## Step 4 — Build the index (one time, and whenever books change)
 ```bash

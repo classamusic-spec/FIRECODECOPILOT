@@ -85,3 +85,40 @@ def test_connecticut_statute_headings_are_citable_sections():
     assert "185" not in sections
     assert "Office of the State Fire Marshal" in sections["29-250"]["text"]
     assert sections["29-252"]["metadata"]["page"] == 1
+
+
+def test_nfpa_decimal_headings_and_number_only_lines_are_citable_sections():
+    pages = [(1,
+        "2020 National Fire Protection Association. All Rights Reserved.\n"
+        "31.1 *  General Requirements.\n"
+        "31.1.1 Application.\n"
+        "31.1.1.1 \n"
+        "The requirements of this chapter shall apply to existing apartment occupancies.\n"
+        "31.2 Means of Egress Requirements.\n"
+        "31.2.1 General.\n"
+        "Means of egress shall comply with Chapter 7 and this chapter.\n")]
+    chunks = chunk_pages(
+        pages,
+        {"book": "NFPA 101 — Life Safety Code", "edition": "2021", "is_amendment_doc": False},
+    )
+    sections = {c["metadata"]["section"]: c for c in chunks}
+    assert "31.1.1.1" in sections
+    assert "31.2.1" in sections
+    assert "2020" not in sections
+    assert "existing apartment occupancies" in sections["31.1.1.1"]["text"]
+
+
+def test_nfpa_annex_headings_keep_the_corresponding_section_number():
+    chunks = chunk_pages(
+        [(1, "A.31.1.1 Application guidance.\nThis annex text explains the application rule.\n")],
+        {"book": "NFPA 101 Annex A", "edition": "2021", "is_amendment_doc": False},
+    )
+    assert chunks[0]["metadata"]["section"] == "A.31.1.1"
+
+
+def test_nfpa_heading_accepts_attached_significance_asterisk():
+    chunks = chunk_pages(
+        [(1, "31.1* General Requirements.\n31.1.1.1*\nAttached-star subsection text.\n")],
+        {"book": "NFPA 101", "edition": "2021", "is_amendment_doc": False},
+    )
+    assert "31.1.1.1" in {c["metadata"]["section"] for c in chunks}

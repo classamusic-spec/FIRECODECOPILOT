@@ -31,8 +31,14 @@ STATUTE_SECTION_HEADING = re.compile(r"^\s*Sec\.\s+(\d+[A-Za-z]*-\d+[A-Za-z]*)\.
 # Case-reporter citations (e.g. "185 C. 445" or "33 CA 422") can begin a PDF-extracted
 # line; they are authorities in annotations, not code-section headings.
 CASE_REPORTER_CITATION = re.compile(r"^\s*\d{1,4}\s+(?:C\.|CA)\s+\d+")
-# A line that begins a new numbered code section, e.g. "903.2.8 Group R" or "1004.5 Occupant".
-SECTION_HEADING = re.compile(r"^\s*(\d{3,4}(?:\.\d+)*)\s+[A-Z(]")
+# A line that begins a new numbered code section. ICC headings usually start with three or four
+# digits ("903.2.8 Group R"), while NFPA headings commonly start with one or two
+# ("7.1 General" / "31.1.1.1"), can carry a significance asterisk, and annexes use an A-prefix.
+# Requiring at least one decimal point prevents copyright years such as "2020 National Fire..."
+# from becoming fake sections. Number-only lines are valid NFPA headings whose body starts next.
+SECTION_HEADING = re.compile(
+    r"^\s*((?:[A-Z]\.)?\d{1,4}(?:\.\d+)+)\*?(?:\s+(?:\*\s*)?[A-Z(]|\s*$)"
+)
 # Structural headings. CASE-SENSITIVE on purpose: real headings are "SECTION 903" / "TABLE 509",
 # while body text says "see Section 903.2" — matching case keeps cross-refs from faking headings.
 SECTION_KEYWORD = re.compile(r"^\s*(SECTION|CHAPTER|TABLE|APPENDIX|ANNEX)\s+([0-9A-Z][0-9A-Z.\-]*)")

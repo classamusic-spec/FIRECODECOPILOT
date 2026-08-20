@@ -25,6 +25,26 @@ def test_good_cited_answer(monkeypatch):
     assert res.answer and "903.2.8" in res.answer
 
 
+def test_nfpa_101_book_name_is_not_falsely_reported_as_missing(monkeypatch):
+    nfpa_sources = [Scored({
+        "text": "31.1.1.1 The requirements of this chapter shall apply to existing apartment occupancies.",
+        "metadata": {
+            "section": "31.1.1.1",
+            "book": "NFPA 101 2021 — Chapter 31 Existing Apartment Buildings",
+            "edition": "2021",
+            "page": 1,
+        },
+    }, 0.9)]
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: nfpa_sources)
+    monkeypatch.setattr(
+        agent.llm, "chat",
+        lambda *a, **k: "NFPA 101 §31.1.1.1 applies to existing apartment occupancies.",
+    )
+    res = agent.ask("Look up NFPA 101 §31.1.1.1")
+    assert res.citations_ok
+    assert res.answer and "not found in your loaded code books" not in res.answer
+
+
 def test_clarifying_questions(monkeypatch):
     _patch(monkeypatch,
            '{"needs_clarification": true, '
@@ -35,6 +55,31 @@ def test_clarifying_questions(monkeypatch):
     assert res.answer is None
     assert res.clarifying_questions == ["What is the occupancy/use group?"]
     assert res.chips == {"What is the occupancy/use group?": ["B", "F-1", "F-2", "R-2", "Mixed-use"]}
+
+
+def test_existing_building_gate_asks_original_permit_date_when_it_controls_part_iv():
+    questions, chips = agent._determinative_facts(
+        "What are the egress requirements for an existing R-2 apartment building?",
+        "Existing R-2; sprinklered; 3 stories; occupant load 40",
+    )
+    assert questions == ["Was the original building permit issued before January 1, 2006?"]
+    assert chips[questions[0]] == ["Before Jan. 1, 2006", "Jan. 1, 2006 or later", "I don't know"]
+
+
+def test_existing_building_gate_accepts_an_explicit_pre_2006_year():
+    questions, _chips = agent._determinative_facts(
+        "What are the egress requirements for this existing R-2 apartment building?",
+        "Originally permitted in 1995; sprinklered; 3 stories; occupant load 40",
+    )
+    assert "Was the original building permit issued before January 1, 2006?" not in questions
+
+
+def test_existing_building_gate_does_not_treat_nfpa_101_mention_as_applicability_fact():
+    questions, _chips = agent._determinative_facts(
+        "Does NFPA 101 apply to this existing R-2 apartment building?",
+        "Existing R-2; sprinklered; 3 stories; occupant load 40",
+    )
+    assert questions == ["Was the original building permit issued before January 1, 2006?"]
 
 
 def test_clarifying_json_in_code_fence(monkeypatch):
@@ -55,13 +100,14 @@ def test_answer_after_clarification_bypasses_another_clarification_round(monkeyp
     """Continue must retrieve and answer, even when some facts remain unknown."""
     _patch(monkeypatch, "For the described existing factory building, see Section 903.2.8.")
     retrievals = []
-    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: retrievals.append(q) or SOURCES)
+    monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: retrievals.append((q, k)) or SOURCES)
     res = agent.ask(
         "what is required for standpipe systems at a factory building?",
-        building_context="Existing; 1–3 stories",
+        building_context="Existing; permitted in 1995; 1–3 stories",
         allow_clarification=False,
     )
-    assert retrievals == ["what is required for standpipe systems at a factory building?"]
+    assert retrievals[0][0] == "what is required for standpipe systems at a factory building?"
+    assert any("permitted in 1995" in q for q in retrievals[0][1].get("extra_queries", []))
     assert not res.needs_clarification
     assert res.answer and "903.2.8" in res.answer
 
@@ -101,7 +147,8 @@ def test_deep_mode_runs_second_retrieval_pass(monkeypatch):
     calls = []
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
     monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
-    agent.ask("sprinkler?", deep=True, building_context="Existing R-2, 4 stories, not sprinklered")
+    agent.ask("sprinkler?", deep=True,
+              building_context="Existing R-2, permitted in 1995, 4 stories, not sprinklered")
     assert len(calls) == 2                                   # first pass, then the deep rewrite pass
     assert calls[1].get("extra_queries") and "building details" in calls[1]["extra_queries"][0]
 

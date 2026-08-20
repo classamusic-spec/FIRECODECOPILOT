@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from .settings import settings
+from .applicability import original_permit_period
 
 # Occupancy groups and common subgroups (IBC/IFC Chapter 3). "R-2" -> "Group R-2 residential...".
 _OCCUPANCY = {
@@ -33,12 +34,46 @@ _TERMS = {
     "fire area": "fire area separation", "occupant load": "occupant load factor",
 }
 
+# Exact code-book identifiers need richer expansion than the generic "NFPA" acronym. Keep these
+# regex-based so "NFPA 1" never fires inside "NFPA 101". Connecticut part labels also lift the
+# controlling amendment documents into the candidates alongside the requested model code.
+_CODE_BOOK_TERMS = (
+    (re.compile(r"\bnfpa\s*101\b", re.IGNORECASE),
+     "NFPA 101 Life Safety Code 2021 Connecticut State Fire Safety Code Part IV"),
+    (re.compile(r"\bnfpa\s*1(?!\d)\b", re.IGNORECASE),
+     "NFPA 1 Fire Code 2021 Connecticut State Fire Prevention Code"),
+    (re.compile(r"\b(?:ifc|international fire code)\b", re.IGNORECASE),
+     "2021 International Fire Code Connecticut State Fire Safety Code Part III"),
+    (re.compile(r"\b(?:iebc|international existing building code)\b", re.IGNORECASE),
+     "2021 International Existing Building Code Connecticut State Building Code"),
+    (re.compile(r"\b(?:ibc|international building code)\b", re.IGNORECASE),
+     "2021 International Building Code Connecticut State Building Code"),
+)
+
+_OPERATIONAL_CUES = re.compile(
+    r"\b(?:hot work|fire watch|hazardous materials?|flammable (?:and )?combustible liquids?|"
+    r"commercial cooking|hood systems?|fire protection systems? maintenance|"
+    r"inspection[,/ ]+testing[,/ ]+(?:and )?maintenance)\b",
+    re.IGNORECASE,
+)
+_CURRENT_WORK_CUES = re.compile(
+    r"\b(?:brand[- ]new|new construction|new building|additions?|alterations?|renovations?|"
+    r"change of (?:occupancy|use))\b",
+    re.IGNORECASE,
+)
+
 # "R-2", "R2", "Group R-2", "Group A" ... captured so we can map the occupancy code. A bare
 # single letter only counts WITH the "Group" prefix; unanchored it matched the English words
 # "a" and "I" ("do i need a permit?"), appending "Group A assembly / Group I institutional" to
 # almost every natural-language query and skewing recall toward the wrong occupancy chapters.
 _OCC_RE = re.compile(r"\b(?:group\s+([ABEFHIMRSU])(?:-?([1-4]))?|([ABEFHIMRSU])-?([1-4]))\b",
                      re.IGNORECASE)
+
+
+def _near_nonactive_edition(query: str, match: re.Match) -> bool:
+    """True when an explicit non-2021 model-code year is attached to this book mention."""
+    window = query[max(0, match.start() - 24):min(len(query), match.end() + 24)]
+    return any(year != "2021" for year in re.findall(r"\b(20\d{2})\b", window))
 
 
 def expand_query(q: str) -> str:
@@ -49,6 +84,34 @@ def expand_query(q: str) -> str:
     seen: set[str] = set()
 
     low = q.lower()
+    period = original_permit_period(q)
+    if period == "pre_2006":
+        full = "NFPA 101 Life Safety Code 2021 Connecticut State Fire Safety Code Part IV"
+        additions.append(full)
+        seen.add(full)
+    elif period == "post_2005":
+        full = "2021 International Fire Code Connecticut State Fire Safety Code Part III"
+        additions.append(full)
+        seen.add(full)
+
+    if _OPERATIONAL_CUES.search(q):
+        full = "NFPA 1 Fire Code 2021 Connecticut State Fire Prevention Code"
+        if full not in seen:
+            additions.append(full)
+            seen.add(full)
+    if _CURRENT_WORK_CUES.search(q):
+        full = "2021 International Fire Code Connecticut State Fire Safety Code Part III"
+        if full not in seen:
+            additions.append(full)
+            seen.add(full)
+
+    for pattern, full in _CODE_BOOK_TERMS:
+        match = pattern.search(q)
+        if (match and not _near_nonactive_edition(q, match)
+                and full.lower() not in low and full not in seen):
+            additions.append(full)
+            seen.add(full)
+
     for abbr, full in _TERMS.items():
         if abbr in low and full.lower() not in low and full not in seen:
             additions.append(full)

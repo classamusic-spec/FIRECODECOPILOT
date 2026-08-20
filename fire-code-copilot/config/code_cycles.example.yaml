@@ -19,54 +19,68 @@ authority_source:
   url: "https://portal.ct.gov/das/office-of-state-building-inspector/building-and-fire-code-adoption-process"
   # Check this URL when a review reminder fires.
 
-# -------- Currently in effect (VERIFY against your books) --------
+# -------- Currently in effect --------
 active_cycle:
   label: "2022 Connecticut State Codes"
-  status: "in_effect"        # in_effect | superseded | pending
-  effective_date: "2022-10-01"   # VERIFY exact date
-  review_after: "2026-06-01"     # when to start watching for the next cycle
+  status: "in_effect"
+  effective_date: "2022-10-01"
+  review_after: "2026-09-01"
   documents:
     - key: "csfsc"
-      title: "Connecticut State Fire Safety Code (CSFSC)"
-      publisher: "State of CT (amends ICC IFC + NFPA 1)"
+      title: "2022 Connecticut State Fire Safety Code (CSFSC)"
+      publisher: "State of Connecticut"
       ct_edition: "2022"
-      base_model_code: "VERIFY — confirm base IFC/NFPA edition for the 2022 CT cycle"
+      base_model_code: "2021 International Fire Code (Part III) + 2021 NFPA 101 Life Safety Code (Part IV)"
+      applies_to: "Part III governs new construction, additions, alterations, and changes of occupancy; Part IV governs qualifying pre-2006 existing buildings."
     - key: "csfpc"
-      title: "Connecticut State Fire Prevention Code (CSFPC)"
-      publisher: "State of CT (amends NFPA 1 / NFPA 101)"
+      title: "2022 Connecticut State Fire Prevention Code (CSFPC)"
+      publisher: "State of Connecticut"
       ct_edition: "2022"
-      base_model_code: "VERIFY"
+      base_model_code: "2021 NFPA 1 Fire Code"
+      applies_to: "Operations, maintenance, permits, hazardous materials, hot work, flammable liquids, and fire-prevention conditions."
     - key: "csbc"
-      title: "Connecticut State Building Code (CSBC)"
-      publisher: "State of CT (amends ICC I-Codes)"
+      title: "2022 Connecticut State Building Code (CSBC)"
+      publisher: "State of Connecticut"
       ct_edition: "2022"
-      base_model_code: "VERIFY"
-    - key: "nfpa70"
-      title: "NFPA 70 — National Electrical Code (as adopted by CT)"
+      base_model_code: "2021 IBC, 2021 IEBC, 2021 IMC, 2021 IPC, 2021 IRC, and other adopted model codes"
+      applies_to: "Building construction and rehabilitation issues coordinated with the Building Official."
+    - key: "referenced_nfpa"
+      title: "Referenced fire-protection standards"
       publisher: "NFPA"
-      ct_edition: "VERIFY"
-      base_model_code: "VERIFY"
+      ct_edition: "as referenced by the 2022 Connecticut codes"
+      base_model_code: "NFPA 13-2019, 14-2019, 20-2019, 25-2020, 72-2019, 96-2021, and other specifically referenced editions"
+    - key: "nfpa70"
+      title: "NFPA 70 — National Electrical Code"
+      publisher: "NFPA"
+      ct_edition: "2020"
+      base_model_code: "2020 NFPA 70/NEC as adopted by the 2022 Connecticut State Building Code"
+  applicability_rules:
+    - "New construction, additions, renovations, and changes of use: start with 2021 IFC as amended by CSFSC Part III, then coordinate with the 2022 CSBC and applicable referenced standards."
+    - "Buildings existing or permitted before January 1, 2006: start with 2021 NFPA 101 as amended by CSFSC Part IV for existing-occupancy life-safety provisions."
+    - "Buildings originally permitted on or after January 1, 2006 do not become Part IV buildings merely because they age; determine the code applicable to the original permit and later work."
+    - "For alterations to a pre-2006 building, analyze unaffected existing portions under applicable Part IV requirements and new work under current Part III plus CSBC/IEBC requirements."
+    - "A change of occupancy/use can trigger requirements applicable to the proposed new occupancy; do not assume an old building is wholly grandfathered."
+    - "Use 2021 NFPA 1 as amended by the CSFPC for operational, maintenance, permitting, and fire-prevention conditions alongside the applicable life-safety/construction code."
 
-# -------- Pending next cycle (watch + warn) --------
+# -------- Pending next cycle (officially delayed) --------
 pending_cycle:
   label: "2026 Connecticut State Codes"
-  status: "pending"
-  # Expected to take effect ~2026-07-01 but awaiting Legislative Regulation
-  # Review Committee (LRRC) approval — the effective date MAY be delayed.
+  status: "delayed"
+  proposed_effective_date: "2026-07-01"
   expected_effective_date: "2026-07-01"
-  confidence: "uncertain — confirm with CT DAS / LRRC"
+  confidence: "officially delayed; no approved effective date published"
+  authority_url: "https://portal.ct.gov/das/office-of-state-building-inspector/building-and-fire-code-adoption-process"
   base_model_codes_referenced:
     - "2024 International Building Code (IBC)"
     - "2024 International Fire Code (IFC)"
     - "2024 International Existing Building Code (IEBC)"
     - "2024 International Mechanical Code (IMC)"
     - "2023 NFPA 70 (National Electrical Code)"
-    - "NFPA 1 / NFPA 101 (editions per CT amendments — VERIFY)"
+    - "NFPA 1 / NFPA 101 editions specified by the proposed Connecticut amendments"
   notes: >
-    When this cycle is adopted: (1) acquire the new code books, (2) drop them in
-    code_books/, (3) update this file (move pending -> active), (4) re-run ingestion,
-    (5) keep the old edition indexed under a separate collection for legacy/existing-
-    building questions about work permitted under the prior cycle.
+    The State says the codes expected for July 1, 2026 are delayed pending approval by the
+    Legislative Regulation Review Committee of the Connecticut General Assembly. Continue using
+    the 2022 Connecticut State Codes until CT DAS publishes an approved effective date.
 
 # -------- Reminder behavior --------
 reminders:
@@ -74,5 +88,5 @@ reminders:
   warn_days_before_expected: 90
   recheck_interval_days: 30
   message: >
-    A new Connecticut code cycle may be in effect or imminent. Verify at the CT DAS
-    site, update your code books and this config, then re-run ingestion.
+    The proposed 2026 Connecticut codes remain delayed pending state approval. Continue using the
+    active 2022 cycle and verify the current status at the CT DAS adoption page.

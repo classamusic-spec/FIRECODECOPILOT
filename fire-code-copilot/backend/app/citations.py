@@ -24,8 +24,9 @@ SECTION_RE = re.compile(
     (?:
         (?:NFPA\s*\d+)                                   # NFPA 13, NFPA 101
       | (?:(?:Section|Sec\.?|§|Table|Chapter|Chap\.?)\s*) # a keyword...
-        \d+[A-Z]?(?:\.\d+)*                              # ...followed by a number
-      | (?<![\w.])\d{3,4}(?:\.\d+)+                       # bare dotted section like 903.2.8
+        (?:[A-Z]\.)?\d+[A-Z]?(?:\.\d+)*                  # ...number, incl. Annex A.31.1
+      | (?<![\w.])(?:\d{3,4}(?:\.\d+)+|(?:[A-Z]\.)?\d{1,2}(?:\.\d+){2,})
+                                                              # bare 903.2.8 / 31.1.1 / A.31.1
     )
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -37,11 +38,25 @@ SECTION_RE = re.compile(
 # answers carried a false "UNVERIFIED CITATION" warning — alarm fatigue that trains the marshal
 # to ignore the one warning guarding against real fabrications.
 STANDARD_RE = re.compile(r"\bNFPA\s*(\d+)\b", re.IGNORECASE)
+PAIRED_STANDARD_SECTION_RE = re.compile(
+    r"\bNFPA\s*(\d+)\b\s*,?\s*(?:Section|Sec\.?|§)\s*"
+    r"((?:[A-Z]\.)?\d+[A-Z]?(?:\.\d+)*)",
+    re.IGNORECASE,
+)
 
 
 def _standard_tokens(text: str) -> set[str]:
     """Canonical 'NFPA <n>' tokens in `text` (spacing-insensitive: 'NFPA13' == 'NFPA 13')."""
     return {f"NFPA {m.group(1)}" for m in STANDARD_RE.finditer(text or "")}
+
+
+def _paired_standard_sections(text: str) -> dict[str, set[str]]:
+    """Map a cited section to every NFPA standard it is explicitly paired with."""
+    out: dict[str, set[str]] = {}
+    for match in PAIRED_STANDARD_SECTION_RE.finditer(text or ""):
+        section = canonical(match.group(2))
+        out.setdefault(section, set()).add(f"NFPA {match.group(1)}")
+    return out
 
 # Text the model placed in straight or curly double quotes.
 QUOTE_RE = re.compile(r"[\"“]([^\"“”]{1,500})[\"”]")
@@ -102,19 +117,38 @@ def validate(answer: str, source_chunks: list[dict]) -> CitationCheck:
     quote is verified if it appears (punctuation-insensitively) in the retrieved source text.
     """
     # Present sections: from metadata, plus every section number literally in the shown text,
-    # plus standard references ("NFPA 13") so citing a standard the sources name can verify.
-    present: set[str] = {_normalize(str(c.get("metadata", {}).get("section", ""))) for c in source_chunks}
-    present.discard("")
+    # plus standard references ("NFPA 13"). A split NFPA chapter export does not repeat the book
+    # name in every chunk, so its authoritative `book`/`source` metadata must count too; otherwise
+    # an answer correctly naming NFPA 101 gets a false "not found in loaded books" warning.
+    present: set[str] = set()
+    sections_by_standard: dict[str, set[str]] = {}
     for c in source_chunks:
         text = c.get("text", "")
-        present |= section_tokens(text)
+        meta = c.get("metadata", {}) or {}
+        chunk_sections = section_tokens(text)
+        if meta_section := _normalize(str(meta.get("section", ""))):
+            chunk_sections.add(meta_section)
+        present |= chunk_sections
         present |= _standard_tokens(text)
+        owner_standards = _standard_tokens(f"{meta.get('book', '')} {meta.get('source', '')}")
+        present |= owner_standards
+        for standard in owner_standards:
+            sections_by_standard.setdefault(standard, set()).update(chunk_sections)
     source_loose = _loose(" ".join(c.get("text", "") for c in source_chunks))
 
     check = CitationCheck(cited=extract_citations(answer))
+    paired = _paired_standard_sections(answer)
     for c in check.cited:
         cited_std = _standard_tokens(c)          # {'NFPA 13'} when c is a standard ref, else empty
-        ok = _normalize(c) in present or (bool(cited_std) and cited_std <= present)
+        normalized = _normalize(c)
+        paired_standards = paired.get(normalized, set())
+        if paired_standards:
+            # A book name and section number form one provenance claim. Do not allow an NFPA 101
+            # chunk plus an unrelated NFPA 1 section to validate "NFPA 101 §31.1.1.1".
+            ok = all(normalized in sections_by_standard.get(standard, set())
+                     for standard in paired_standards)
+        else:
+            ok = normalized in present or (bool(cited_std) and cited_std <= present)
         (check.verified if ok else check.unverified).append(c)
 
     for q in extract_quotes(answer):
