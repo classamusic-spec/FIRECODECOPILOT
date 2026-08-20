@@ -280,10 +280,14 @@ export default function App() {
     // Snapshot follow-up memory BEFORE appending the new turns.
     const history = recentExchanges(turns);
 
-    // Save the question before generation starts. If the app closes mid-stream, the chat still
-    // exists under Saved Chats and the marshal can reopen the question instead of losing it.
-    setThreads((prev) => saveStartedThread(prev, activeId, turns, userTurn));
-    saveActiveId(activeId);
+    // Save synchronously before generation starts. Keeping the localStorage write outside a React
+    // updater guarantees the question is durable before askStream runs; demo/showcase turns must
+    // never enter the user's real Saved Chats store.
+    if (!DEMO) {
+      const startedThreads = saveStartedThread(threads, activeId, turns, userTurn);
+      setThreads(startedThreads);
+      saveActiveId(activeId);
+    }
     setTurns((prev) => [
       ...prev,
       userTurn,
