@@ -18,6 +18,7 @@ import { ChevronIcon } from "./icons";
 import { sectionsRelate } from "../lib/sections";
 import { findCitedSpan } from "../lib/citations";
 import type { CiteTarget } from "./ChatMessage";
+import PageLightbox from "./PageLightbox";
 
 interface Props {
   source: Source;
@@ -57,12 +58,15 @@ export default function SourceCitation({ source, index, highlight }: Props) {
   const [flash, setFlash] = useState(false);
   const [showPage, setShowPage] = useState(false);
   const [pageError, setPageError] = useState(false);
+  const [pageExpanded, setPageExpanded] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const meta = source.metadata ?? {};
 
   // "View page" needs the source PDF filename + a numeric page, and a real backend (not demo).
   const pageNum = typeof meta.page === "number" ? meta.page : Number(meta.page);
   const canShowPage = !DEMO && Boolean(meta.source) && Number.isFinite(pageNum) && pageNum >= 1;
+  const pageAlt = `${meta.book ?? "code book"} page ${pageNum}`;
+  const pageSrc = canShowPage ? pageImageUrl(String(meta.source), pageNum) : "";
 
   // An amendment is "controlling" CT-adopted text; either flag triggers the badge.
   const isAmendment = Boolean(meta.is_amendment || meta.controlling);
@@ -84,6 +88,7 @@ export default function SourceCitation({ source, index, highlight }: Props) {
   }, [highlight?.nonce]);
 
   return (
+    <>
     <div
       ref={cardRef}
       className={
@@ -143,13 +148,23 @@ export default function SourceCitation({ source, index, highlight }: Props) {
                 {showPage ? "Hide page" : `View page ${pageNum} in the book`}
               </button>
               {showPage && !pageError && (
-                <img
-                  src={pageImageUrl(String(meta.source), pageNum)}
-                  alt={`${meta.book ?? "code book"} page ${pageNum}`}
-                  loading="lazy"
-                  onError={() => setPageError(true)}
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-white"
-                />
+                <button
+                  type="button"
+                  onClick={() => setPageExpanded(true)}
+                  aria-label={`Expand ${pageAlt}`}
+                  className="group relative mt-2 block w-full overflow-hidden rounded-lg border border-white/10 bg-white text-left shadow-card transition hover:border-coral-400/60 focus:outline-none focus:ring-2 focus:ring-coral-400"
+                >
+                  <img
+                    src={pageSrc}
+                    alt={pageAlt}
+                    loading="lazy"
+                    onError={() => setPageError(true)}
+                    className="w-full transition duration-200 group-hover:scale-[1.01]"
+                  />
+                  <span className="absolute bottom-3 right-3 rounded-full border border-white/15 bg-navy-950/90 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-white shadow-card backdrop-blur-md transition group-hover:bg-coral-500">
+                    Click to enlarge
+                  </span>
+                </button>
               )}
               {showPage && pageError && (
                 <p className="mt-2 text-[11px] text-steel-500">
@@ -161,5 +176,9 @@ export default function SourceCitation({ source, index, highlight }: Props) {
         </div>
       )}
     </div>
+    {pageExpanded && (
+      <PageLightbox src={pageSrc} alt={pageAlt} onClose={() => setPageExpanded(false)} />
+    )}
+    </>
   );
 }

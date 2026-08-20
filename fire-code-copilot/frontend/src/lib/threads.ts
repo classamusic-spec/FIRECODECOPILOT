@@ -124,6 +124,20 @@ export function upsertThread(threads: Thread[], id: string, turns: Turn[]): Thre
   return next;
 }
 
+/**
+ * Persist the user's new question before generation begins. This makes the conversation appear
+ * in Saved Chats immediately and preserves the question if the app or model server closes while
+ * the answer is streaming. The completed assistant turn is written later by App's settle effect.
+ */
+export function saveStartedThread(
+  threads: Thread[],
+  id: string,
+  currentTurns: Turn[],
+  userTurn: Turn,
+): Thread[] {
+  return upsertThread(threads, id, [...currentTurns, userTurn]);
+}
+
 /** Remove a thread by id, persist, and return the new list (merged with the live store). */
 export function removeThread(_threads: Thread[], id: string): Thread[] {
   const next = loadThreads().filter((t) => t.id !== id);

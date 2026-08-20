@@ -22,6 +22,7 @@ import {
   loadActiveId,
   saveActiveId,
   upsertThread,
+  saveStartedThread,
   removeThread,
   newThreadId,
   setThreadMatter,
@@ -275,12 +276,17 @@ export default function App() {
     if (!question || sending) return;
     const ctx = buildingContext.trim();
     const assistantId = uid();
+    const userTurn: Turn = { id: uid(), role: "user", text: question, buildingContext: ctx };
     // Snapshot follow-up memory BEFORE appending the new turns.
     const history = recentExchanges(turns);
 
+    // Save the question before generation starts. If the app closes mid-stream, the chat still
+    // exists under Saved Chats and the marshal can reopen the question instead of losing it.
+    setThreads((prev) => saveStartedThread(prev, activeId, turns, userTurn));
+    saveActiveId(activeId);
     setTurns((prev) => [
       ...prev,
-      { id: uid(), role: "user", text: question, buildingContext: ctx },
+      userTurn,
       { id: assistantId, role: "assistant", status: "streaming", streamText: "", question, buildingContext: ctx },
     ]);
     setDraft("");
