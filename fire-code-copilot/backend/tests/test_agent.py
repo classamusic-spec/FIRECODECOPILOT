@@ -68,8 +68,17 @@ def test_existing_building_gate_asks_original_permit_date_when_it_controls_part_
 
 def test_existing_building_gate_accepts_an_explicit_pre_2006_year():
     questions, _chips = agent._determinative_facts(
-        "What are the egress requirements for this existing R-2 apartment building?",
-        "Originally permitted in 1995; sprinklered; 3 stories; occupant load 40",
+        "What are the egress requirements for an existing R-2 apartment building?",
+        "Existing R-2; originally permitted in 1995; sprinklered; 3 stories; occupant load 40",
+    )
+    assert "Was the original building permit issued before January 1, 2006?" not in questions
+
+
+def test_existing_building_gate_accepts_explicit_original_cutoff_phrase():
+    questions, _chips = agent._determinative_facts(
+        "What are the egress requirements for an existing R-2 apartment building?",
+        ("Existing R-2; originally permitted before 2006; sprinklered; "
+         "3 stories; occupant load 40"),
     )
     assert "Was the original building permit issued before January 1, 2006?" not in questions
 
@@ -80,6 +89,54 @@ def test_existing_building_gate_does_not_treat_nfpa_101_mention_as_applicability
         "Existing R-2; sprinklered; 3 stories; occupant load 40",
     )
     assert questions == ["Was the original building permit issued before January 1, 2006?"]
+
+
+def test_unrelated_work_dates_do_not_satisfy_original_permit_gate():
+    question = "What egress rules apply to this existing R-2 apartment building?"
+    facts = "sprinklered; 3 stories; occupant load 40"
+    for unrelated in (
+        "renovated after 2006",
+        "sprinkler permit issued after 2006",
+        "addition built in 2015",
+    ):
+        questions, _chips = agent._determinative_facts(
+            question, f"Existing R-2; {facts}; {unrelated}",
+        )
+        assert questions == ["Was the original building permit issued before January 1, 2006?"]
+
+
+def test_explicit_original_permit_wins_over_later_addition_date():
+    questions, _chips = agent._determinative_facts(
+        "What egress rules apply to this existing R-2 apartment building?",
+        ("Existing R-2; sprinklered; 3 stories; occupant load 40; "
+         "original permit issued in 1995; addition built in 2015"),
+    )
+    assert "Was the original building permit issued before January 1, 2006?" not in questions
+
+
+def test_existing_building_gate_accepts_bare_quick_pick_answer():
+    question = "What egress rules apply to this existing R-2 apartment building?"
+    known = "Existing R-2; sprinklered; 3 stories; occupant load 40"
+    for answer in ("Before Jan. 1, 2006", "Jan. 1, 2006 or later"):
+        questions, _chips = agent._determinative_facts(question, f"{known}\n{answer}")
+        assert "Was the original building permit issued before January 1, 2006?" not in questions
+    rewrite = agent._deep_rewrite(
+        "What egress rules apply?",
+        "Existing R-2; sprinklered\nBefore Jan. 1, 2006",
+    )
+    assert rewrite and "original building permit was before January 1, 2006" in rewrite
+    assert agent.original_permit_period(rewrite) == "pre_2006"
+
+
+def test_production_labeled_post_2005_quick_pick_is_recognized():
+    context = (
+        "Was the original building permit issued before January 1, 2006?: "
+        "Jan. 1, 2006 or later; Existing R-2; note: sprinkler installed in 1995"
+    )
+    assert agent.original_permit_period(context, allow_bare_cutoff=True) == "post_2005"
+    rewrite = agent._deep_rewrite("What egress rules apply?", context)
+    assert rewrite and "original building permit was January 1, 2006 or later" in rewrite
+    assert agent.original_permit_period(rewrite) == "post_2005"
 
 
 def test_clarifying_json_in_code_fence(monkeypatch):
@@ -103,7 +160,7 @@ def test_answer_after_clarification_bypasses_another_clarification_round(monkeyp
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: retrievals.append((q, k)) or SOURCES)
     res = agent.ask(
         "what is required for standpipe systems at a factory building?",
-        building_context="Existing; permitted in 1995; 1–3 stories",
+        building_context="Existing; originally permitted in 1995; 1–3 stories",
         allow_clarification=False,
     )
     assert retrievals[0][0] == "what is required for standpipe systems at a factory building?"
@@ -148,7 +205,7 @@ def test_deep_mode_runs_second_retrieval_pass(monkeypatch):
     monkeypatch.setattr(agent, "retrieve_scored", lambda q, **k: calls.append(k) or SOURCES)
     monkeypatch.setattr(agent.llm, "chat", lambda *a, **k: "Per §903.2.8, yes.")
     agent.ask("sprinkler?", deep=True,
-              building_context="Existing R-2, permitted in 1995, 4 stories, not sprinklered")
+              building_context="Existing R-2, originally permitted in 1995, 4 stories, not sprinklered")
     assert len(calls) == 2                                   # first pass, then the deep rewrite pass
     assert calls[1].get("extra_queries") and "building details" in calls[1]["extra_queries"][0]
 

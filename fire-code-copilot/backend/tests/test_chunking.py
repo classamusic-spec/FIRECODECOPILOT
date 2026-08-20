@@ -1,5 +1,5 @@
 """Section-aware chunking: the failures that produce wrong citations must stay fixed."""
-from app.chunking import chunk_pages
+from app.chunking import chunk_pages, _normalized_code_families
 
 META = {"book": "IFC", "edition": "2021", "is_amendment_doc": False}
 
@@ -122,3 +122,37 @@ def test_nfpa_heading_accepts_attached_significance_asterisk():
         {"book": "NFPA 101", "edition": "2021", "is_amendment_doc": False},
     )
     assert "31.1.1.1" in {c["metadata"]["section"] for c in chunks}
+
+
+def test_ct_fire_safety_amendments_emit_normalized_part_code_family():
+    chunks = chunk_pages(
+        [
+            (9, "SECTION 101 SCOPE\n101.1 Title. Part III of the Connecticut State Fire Safety Code applies.\n"),
+            (103, "PART IV—Existing Buildings/Occupancies Amendments to the 2021 NFPA 101, Life Safety Code\n"
+                  "CHAPTER 1 ADMINISTRATION\n1.1.1 This Part IV rule.\n"
+                  "This requirement applies to all applicable existing occupancies in this part.\n"),
+        ],
+        {"book": "CT Fire Safety Code amendments", "edition": "2022",
+         "is_amendment_doc": True},
+    )
+    by_section = {c["metadata"]["section"]: c["metadata"] for c in chunks}
+    assert by_section["101.1"]["code_family"] == "ifc"
+    assert by_section["1.1.1"]["code_family"] == "nfpa:101"
+
+
+def test_ct_building_amendment_family_stops_at_other_model_code_portions():
+    families = _normalized_code_families(
+        [
+            (2, "TABLE OF CONTENTS Amendments to the 2021 International Existing Building Code"),
+            (6, "3 AMENDMENTS TO THE 2021 INTERNATIONAL BUILDING CODE CHAPTER 1"),
+            (76, "73 AMENDMENTS TO THE 2021 INTERNATIONAL EXISTING BUILDING CODE CHAPTER 1"),
+            (84, "81 AMENDMENTS TO THE 2021 INTERNATIONAL PLUMBING CODE CHAPTER 1"),
+            (85, "Plumbing amendment continuation."),
+        ],
+        {"book": "CT Building Code amendments", "edition": "2022",
+         "is_amendment_doc": True},
+    )
+    assert families[2] == "ibc"
+    assert families[6] == "ibc"
+    assert families[76] == "iebc"
+    assert 84 not in families and 85 not in families

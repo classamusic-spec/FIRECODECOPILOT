@@ -26,7 +26,7 @@ def temp_index(tmp_path, monkeypatch):
         ("903.2.8 Group R (Amd). Connecticut substitutes: sprinklers required throughout all "
          "Group R buildings including existing buildings on change of occupancy.",
          {"section": "903.2.8", "book": "CSFSC", "edition": "2022", "is_amendment": True,
-          "is_table": False, "page": 1}),
+          "code_family": "ifc", "is_table": False, "page": 1}),
         ("907.2.9 Group R-2. A manual fire alarm system shall be installed in Group R-2 "
          "occupancies meeting the listed conditions.",
          {"section": "907.2.9", "book": "IFC", "edition": "2021", "is_amendment": False,

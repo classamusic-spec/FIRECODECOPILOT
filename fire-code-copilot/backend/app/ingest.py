@@ -17,7 +17,11 @@ from pathlib import Path
 
 from .settings import settings
 from . import embeddings
-from .chunking import chunk_pages, TARGET_WORDS as TARGET_HINT
+from .chunking import (
+    chunk_pages,
+    _normalized_code_families,
+    TARGET_WORDS as TARGET_HINT,
+)
 
 STATE_FILE = Path(settings.data_dir) / "ingest_state.json"
 COLLECTIONS_FILE = Path(settings.data_dir) / "collections.json"
@@ -269,6 +273,9 @@ def _table_chunks(pdf: Path, meta: dict) -> list[dict]:
         doc = fitz.open(pdf)
     except Exception:
         return out
+    code_family_by_page = _normalized_code_families(
+        [(i + 1, doc[i].get_text("text")) for i in range(len(doc))], meta
+    )
     for i, page in enumerate(doc):
         try:
             found = getattr(page.find_tables(), "tables", []) or []
@@ -285,9 +292,14 @@ def _table_chunks(pdf: Path, meta: dict) -> list[dict]:
             if not md or not md.strip():
                 continue
             section = caps[ti] if ti < len(caps) else (caps[0] if caps else "(table)")
-            out.append({"text": md, "metadata": {
+            table_meta = {
                 "book": meta["book"], "edition": meta["edition"], "section": section,
-                "page": i + 1, "is_amendment": bool(meta.get("is_amendment_doc")), "is_table": True}})
+                "page": i + 1, "is_amendment": bool(meta.get("is_amendment_doc")),
+                "is_table": True,
+            }
+            if code_family := code_family_by_page.get(i + 1):
+                table_meta["code_family"] = code_family
+            out.append({"text": md, "metadata": table_meta})
     doc.close()
     return out
 

@@ -432,7 +432,15 @@ def _deep_rewrite(question: str, building_context: str) -> str | None:
     into the query pulls in chunks the bare question missed. Returns None when there's nothing to
     add (deep then falls back to a model swap only)."""
     ctx = (building_context or "").strip()
-    return f"{question} — building details: {ctx}" if ctx else None
+    if not ctx:
+        return None
+    period = original_permit_period(ctx, allow_bare_cutoff=True)
+    normalized = {
+        "pre_2006": "original building permit was before January 1, 2006",
+        "post_2005": "original building permit was January 1, 2006 or later",
+    }.get(period or "")
+    suffix = f"; {normalized}" if normalized else ""
+    return f"{question} — building details: {ctx}{suffix}"
 
 
 def _parse_clarification(draft: str) -> dict | None:

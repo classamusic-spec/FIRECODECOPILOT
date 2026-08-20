@@ -5,11 +5,12 @@ them: section numbers ("903.2.11.6"), standard names ("NFPA 13"), "Table 509". B
 We run BM25 alongside the dense query and fuse the two rankings (see retriever._fuse), so a
 verbatim section/standard lookup can't fall through the cracks.
 
-The BM25 index is built from the collection's documents and cached per (store, collection, size)
-so it rebuilds only when the collection changes.
+The BM25 index is built from the collection's documents and cached per store/collection revision,
+so it rebuilds only when the collection changes and replaces the stale in-memory generation.
 """
 from __future__ import annotations
 import re
+import threading
 from pathlib import Path
 
 from .settings import settings
@@ -17,8 +18,9 @@ from .settings import settings
 # Tokenizer that keeps dotted section numbers ("903.2.8") and standard refs as single tokens.
 _TOKEN = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)+|[a-z0-9]+")
 
-# (store_path, collection_name, count) -> (BM25Okapi, ids, docs, metas)
+# (store_path, collection_name, count, revision) -> (BM25Okapi, ids, docs, metas)
 _cache: dict[tuple, tuple] = {}
+_cache_lock = threading.Lock()
 
 
 def _tokenize(text: str) -> list[str]:
@@ -38,6 +40,13 @@ def _store_revision() -> tuple[int, int]:
 
 
 def _index_for(coll):
+    # Serialize corpus-sized generation replacement. Concurrent first reads must not build two
+    # copies and race while evicting one another's key.
+    with _cache_lock:
+        return _index_for_locked(coll)
+
+
+def _index_for_locked(coll):
     n = coll.count()
     key = (settings.chroma_dir, coll.name, n, _store_revision())
     hit = _cache.get(key)
@@ -74,6 +83,11 @@ def _index_for(coll):
             for d, m in zip(docs, metas)
         ]
         bm25 = BM25Okapi([_tokenize(d) for d in searchable])
+    # Keep only one complete BM25 generation per collection. A reindex may change the SQLite
+    # revision many times; retaining every old corpus-sized index causes unbounded memory growth.
+    for old_key in list(_cache):
+        if old_key[:2] == key[:2] and old_key != key:
+            del _cache[old_key]
     _cache[key] = (bm25, ids, docs, metas)
     return _cache[key]
 
@@ -94,4 +108,5 @@ def search(coll, query: str, k: int) -> list[dict]:
 
 def reset_cache() -> None:
     """Drop the cached BM25 indexes (used by tests; also safe after a re-ingest)."""
-    _cache.clear()
+    with _cache_lock:
+        _cache.clear()

@@ -62,6 +62,14 @@ def test_unrelated_before_2006_date_does_not_override_explicit_post_cutoff_permi
     assert "NFPA 101 Life Safety Code" not in out
 
 
+def test_addition_permit_does_not_contradict_explicit_original_building_permit():
+    out = expand_query(
+        "Existing R-2; original permit issued in 1995; addition originally permitted in 2015"
+    )
+    assert "NFPA 101 Life Safety Code" in out
+    assert "Part IV" in out
+
+
 def test_renovation_date_alone_does_not_claim_original_permit_period():
     out = expand_query("Existing apartment renovated after 2006")
     assert "NFPA 101 Life Safety Code" not in out
@@ -75,6 +83,21 @@ def test_equipment_construction_year_does_not_select_building_code_layer():
 def test_equipment_cutoff_phrase_does_not_select_building_code_layer():
     out = expand_query("Existing apartment; sprinkler system constructed before 2006")
     assert "NFPA 101 Life Safety Code" not in out
+
+    out = expand_query(
+        "Existing R-2; alarm panel originally constructed in 1995; original permit unknown"
+    )
+    assert "NFPA 101 Life Safety Code" not in out
+
+
+def test_pending_original_permit_does_not_own_nearby_unrelated_dates():
+    for question in (
+        "Existing R-2; original permit pending; renovated after 2006",
+        "Existing R-2; original permit pending; sprinkler installed before 2006",
+    ):
+        out = expand_query(question)
+        assert "NFPA 101 Life Safety Code" not in out
+        assert "2021 International Fire Code" not in out
 
 
 def test_post_2005_existing_building_expands_to_ifc_part_iii_not_nfpa_101():
@@ -93,6 +116,49 @@ def test_explicit_future_ifc_edition_is_not_rewritten_as_active_cycle():
     out = expand_query("What changed in the 2024 International Fire Code?")
     assert "2021 International Fire Code" not in out
     assert "Part III" not in out
+
+
+def test_historical_ifc_edition_after_section_reference_is_not_rewritten():
+    out = expand_query("Compare IFC Section 903.2.8 from the 2018 edition")
+    assert "2021 International Fire Code" not in out
+    assert "Part III" not in out
+
+
+def test_historical_new_construction_query_is_not_rewritten_as_active_cycle():
+    out = expand_query("What changed for new construction in the 2024 International Fire Code?")
+    assert "2021 International Fire Code" not in out
+    assert "Part III" not in out
+
+
+def test_historical_nfpa_1_hot_work_query_is_not_rewritten_as_2021():
+    out = expand_query("Compare hot work rules in the 2018 NFPA 1 Fire Code")
+    assert "NFPA 1 Fire Code 2021" not in out
+    assert "Connecticut State Fire Prevention Code" not in out
+
+
+def test_atypical_and_hyphenated_primary_editions_are_not_rewritten():
+    for question in (
+        "Compare the 1997 NFPA 101 edition",
+        "Compare the 2018-edition IFC",
+    ):
+        out = expand_query(question)
+        assert "NFPA 101 Life Safety Code 2021" not in out
+        assert "2021 International Fire Code" not in out
+
+
+def test_mixed_ifc_editions_preserve_explicit_active_side():
+    out = expand_query("Compare 2018 and 2021 IFC")
+    assert "International Fire Code" in out
+
+
+def test_secondary_standard_edition_does_not_disable_active_ifc():
+    out = expand_query("Under the 2021 IFC, use the 2018 edition of NFPA 13")
+    assert "International Fire Code" in out
+
+
+def test_uneditioned_primary_family_keeps_active_side_of_historical_comparison():
+    out = expand_query("Compare the 2018 IFC with NFPA 101")
+    assert "NFPA 101 Life Safety Code 2021" in out
 
 
 def test_operational_hot_work_question_expands_to_nfpa_1_and_csfpc():

@@ -23,7 +23,7 @@ SECTION_RE = re.compile(
     r"""
     (?:
         (?:NFPA\s*\d+)                                   # NFPA 13, NFPA 101
-      | (?:(?:Section|Sec\.?|§|Table|Chapter|Chap\.?)\s*) # a keyword...
+      | (?:(?:Sections?|Sec\.?|§|Table|Chapter|Chap\.?)\s*) # a keyword...
         (?:[A-Z]\.)?\d+[A-Z]?(?:\.\d+)*                  # ...number, incl. Annex A.31.1
       | (?<![\w.])(?:\d{3,4}(?:\.\d+)+|(?:[A-Z]\.)?\d{1,2}(?:\.\d+){2,})
                                                               # bare 903.2.8 / 31.1.1 / A.31.1
@@ -38,11 +38,34 @@ SECTION_RE = re.compile(
 # answers carried a false "UNVERIFIED CITATION" warning — alarm fatigue that trains the marshal
 # to ignore the one warning guarding against real fabrications.
 STANDARD_RE = re.compile(r"\bNFPA\s*(\d+)\b", re.IGNORECASE)
-PAIRED_STANDARD_SECTION_RE = re.compile(
-    r"\bNFPA\s*(\d+)\b\s*,?\s*(?:Section|Sec\.?|§)\s*"
-    r"((?:[A-Z]\.)?\d+[A-Z]?(?:\.\d+)*)",
+_CITATION_IDENTIFIER_RE = re.compile(r"(?:[A-Z]\.)?\d+[A-Z]?(?:\.\d+)*", re.IGNORECASE)
+_CITATION_LEAD = r"(?:Sections?|Sec\.?|§{1,2}|Table|Chapter|Chap\.?)"
+_CITATION_LEAD_RE = re.compile(_CITATION_LEAD, re.IGNORECASE)
+_CODE_OWNER = (
+    r"(?:NFPA\s*\d+|IFC|IBC|IEBC|"
+    r"International\s+(?:Fire|Building|Existing\s+Building)\s+Code)"
+)
+_CODE_OWNER_RE = re.compile(rf"\b(?P<owner>{_CODE_OWNER})\b", re.IGNORECASE)
+_PREFIX_CODE_CITATION_RE = re.compile(
+    rf"\b(?P<owner>{_CODE_OWNER})\b"
+    rf"\s*(?:Life Safety Code|Fire Code)?\s*"
+    rf"(?:\(?\b(?:19|20)\d{{2}}\b\)?(?:\s+edition)?)?\s*[,():-]*\s*"
+    rf"(?P<lead>{_CITATION_LEAD})\s*",
     re.IGNORECASE,
 )
+_PREFIX_CODE_BARE_SECTION_RE = re.compile(
+    rf"\b(?P<owner>{_CODE_OWNER})\b"
+    r"\s*(?:Life Safety Code|Fire Code)?\s*"
+    r"(?:\(?\b(?:19|20)\d{2}\b\)?(?:\s+edition)?)?\s*[,():-]*\s*"
+    r"(?P<section>(?:[A-Z]\.)?\d+[A-Z]?(?:\.\d+)+)",
+    re.IGNORECASE,
+)
+_POSTFIX_CODE_CITATION_RE = re.compile(
+    rf"(?P<lead>{_CITATION_LEAD})\s*(?P<body>.*?)\s+of\s+(?:the\s+)?"
+    rf"(?P<owner>{_CODE_OWNER})\b",
+    re.IGNORECASE,
+)
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[!?])\s+|(?<=\.)\s+(?=[A-Z])")
 
 
 def _standard_tokens(text: str) -> set[str]:
@@ -50,12 +73,61 @@ def _standard_tokens(text: str) -> set[str]:
     return {f"NFPA {m.group(1)}" for m in STANDARD_RE.finditer(text or "")}
 
 
-def _paired_standard_sections(text: str) -> dict[str, set[str]]:
-    """Map a cited section to every NFPA standard it is explicitly paired with."""
+def _canonical_owner(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value.strip()).upper()
+    if match := re.match(r"NFPA\s*(\d+)", normalized):
+        return f"NFPA {match.group(1)}"
+    if normalized == "IEBC" or "EXISTING BUILDING" in normalized:
+        return "IEBC"
+    if normalized == "IFC" or "FIRE CODE" in normalized:
+        return "IFC"
+    if normalized == "IBC" or "BUILDING CODE" in normalized:
+        return "IBC"
+    return normalized
+
+
+def _paired_code_sections(text: str) -> dict[str, set[str]]:
+    """Map explicitly attributed sections to their owning NFPA/ICC code book.
+
+    Ownership is grammatical and sentence-local. Coordinated mixed-book text such as
+    ``IFC Section 903 and Section 31 of NFPA 101`` is split at the repeated citation lead so each
+    section remains paired with only its explicit owner.
+    """
     out: dict[str, set[str]] = {}
-    for match in PAIRED_STANDARD_SECTION_RE.finditer(text or ""):
-        section = canonical(match.group(2))
-        out.setdefault(section, set()).add(f"NFPA {match.group(1)}")
+
+    def add_sections(body: str, owner_value: str) -> None:
+        owner = _canonical_owner(owner_value)
+        for section_match in _CITATION_IDENTIFIER_RE.finditer(body):
+            section = canonical(section_match.group(0))
+            if section:
+                out.setdefault(section, set()).add(owner)
+
+    for sentence in _SENTENCE_BREAK_RE.split(text or ""):
+        postfix_starts: list[int] = []
+        for match in _POSTFIX_CODE_CITATION_RE.finditer(sentence):
+            body = match.group("body")
+            segment_start = match.start()
+            if _CODE_OWNER_RE.search(sentence[:match.start()]):
+                # The earlier owner keeps the first citation phrase. The repeated lead begins the
+                # postfix-owned phrase: ``IFC Section 903 and Section 31 of NFPA 101``.
+                if nested_lead := _CITATION_LEAD_RE.search(body):
+                    segment_start = match.start("body") + nested_lead.start()
+                    body = body[nested_lead.end():]
+            postfix_starts.append(segment_start)
+            add_sections(body, match.group("owner"))
+
+        for match in _PREFIX_CODE_CITATION_RE.finditer(sentence):
+            end = len(sentence)
+            if next_owner := _CODE_OWNER_RE.search(sentence, match.end()):
+                end = min(end, next_owner.start())
+            for postfix_start in postfix_starts:
+                if match.end() <= postfix_start < end:
+                    end = postfix_start
+            add_sections(sentence[match.end():end], match.group("owner"))
+
+        for match in _PREFIX_CODE_BARE_SECTION_RE.finditer(sentence):
+            add_sections(match.group("section"), match.group("owner"))
+
     return out
 
 # Text the model placed in straight or curly double quotes.
@@ -78,11 +150,16 @@ def _loose(text: str) -> str:
 def extract_citations(text: str) -> list[str]:
     """Return the distinct section citations the model used, in order of appearance."""
     seen, out = set(), []
-    for m in SECTION_RE.finditer(text):
-        norm = _normalize(m.group(0))
+    candidates = [(m.start(), m.group(0)) for m in SECTION_RE.finditer(text)]
+    candidates.extend(
+        (m.start("section"), m.group("section"))
+        for m in _PREFIX_CODE_BARE_SECTION_RE.finditer(text)
+    )
+    for _position, citation in sorted(candidates):
+        norm = _normalize(citation)
         if norm and norm not in seen:
             seen.add(norm)
-            out.append(m.group(0).strip())
+            out.append(citation.strip())
     return out
 
 
@@ -109,6 +186,28 @@ class CitationCheck:
         return not self.unverified and not self.unverified_quotes
 
 
+def _metadata_owners(meta: dict) -> set[str]:
+    owners = _standard_tokens(f"{meta.get('book', '')} {meta.get('source', '')}")
+    family_owner = {
+        "nfpa:101": "NFPA 101",
+        "nfpa:1": "NFPA 1",
+        "ifc": "IFC",
+        "ibc": "IBC",
+        "iebc": "IEBC",
+    }
+    if family := family_owner.get(str(meta.get("code_family", "")).lower()):
+        owners.add(family)
+
+    label = f"{meta.get('book', '')} {meta.get('source', '')}"
+    if re.search(r"\bIEBC\b|International\s+Existing\s+Building\s+Code", label, re.I):
+        owners.add("IEBC")
+    elif re.search(r"\bIBC\b|International\s+Building\s+Code", label, re.I):
+        owners.add("IBC")
+    if re.search(r"\bIFC\b|International\s+Fire\s+Code", label, re.I):
+        owners.add("IFC")
+    return owners
+
+
 def validate(answer: str, source_chunks: list[dict]) -> CitationCheck:
     """Check every cited section and every substantial quote in `answer` against the sources.
 
@@ -121,7 +220,7 @@ def validate(answer: str, source_chunks: list[dict]) -> CitationCheck:
     # name in every chunk, so its authoritative `book`/`source` metadata must count too; otherwise
     # an answer correctly naming NFPA 101 gets a false "not found in loaded books" warning.
     present: set[str] = set()
-    sections_by_standard: dict[str, set[str]] = {}
+    sections_by_owner: dict[str, set[str]] = {}
     for c in source_chunks:
         text = c.get("text", "")
         meta = c.get("metadata", {}) or {}
@@ -130,23 +229,23 @@ def validate(answer: str, source_chunks: list[dict]) -> CitationCheck:
             chunk_sections.add(meta_section)
         present |= chunk_sections
         present |= _standard_tokens(text)
-        owner_standards = _standard_tokens(f"{meta.get('book', '')} {meta.get('source', '')}")
-        present |= owner_standards
-        for standard in owner_standards:
-            sections_by_standard.setdefault(standard, set()).update(chunk_sections)
+        owner_books = _metadata_owners(meta)
+        present |= {owner for owner in owner_books if owner.startswith("NFPA ")}
+        for owner in owner_books:
+            sections_by_owner.setdefault(owner, set()).update(chunk_sections)
     source_loose = _loose(" ".join(c.get("text", "") for c in source_chunks))
 
     check = CitationCheck(cited=extract_citations(answer))
-    paired = _paired_standard_sections(answer)
+    paired = _paired_code_sections(answer)
     for c in check.cited:
         cited_std = _standard_tokens(c)          # {'NFPA 13'} when c is a standard ref, else empty
         normalized = _normalize(c)
-        paired_standards = paired.get(normalized, set())
-        if paired_standards:
-            # A book name and section number form one provenance claim. Do not allow an NFPA 101
-            # chunk plus an unrelated NFPA 1 section to validate "NFPA 101 §31.1.1.1".
-            ok = all(normalized in sections_by_standard.get(standard, set())
-                     for standard in paired_standards)
+        paired_owners = paired.get(normalized, set())
+        if paired_owners:
+            # A book name and section number form one provenance claim. Never allow a section from
+            # another retrieved code to verify an explicitly attributed NFPA/IFC/IBC/IEBC citation.
+            ok = all(normalized in sections_by_owner.get(owner, set())
+                     for owner in paired_owners)
         else:
             ok = normalized in present or (bool(cited_std) and cited_std <= present)
         (check.verified if ok else check.unverified).append(c)

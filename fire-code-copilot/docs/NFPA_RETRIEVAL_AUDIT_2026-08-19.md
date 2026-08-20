@@ -114,6 +114,30 @@ the remaining active document is the known image-only `Plan Review Check list.pd
 - Hot-work retrieval ranked NFPA 1 Chapter 41 first.
 - Explicit NFPA 13 and NFPA 96 queries ranked the requested standards first.
 - Connecticut Part IV amendment queries ranked the Connecticut Fire Safety Code amendment layer.
-- Backend: **163 passed, 1 skipped**.
+- Backend: **203 passed, 1 skipped**.
 - Frontend TypeScript typecheck and production build: passed.
 - `git diff --check` and the added-line security scan: clean.
+
+### Post-commit independent-review hardening
+
+Independent fail-closed reviews completed after the first audit commit and identified additional
+logic gaps. The follow-up patch now:
+
+- recognizes the normalized `is_amendment` metadata actually emitted by `chunk_pages()`, rather
+  than relying only on manifest input metadata;
+- emits normalized `code_family` metadata for ordinary and table chunks, distinguishes CSFSC Part
+  III/IFC from Part IV/NFPA 101, and stops CSBC amendment ownership when another model-code portion
+  begins; 579 existing Connecticut amendment records were migrated in place without recomputing
+  embeddings, with the pre-migration metadata retained in a local backup;
+- parses the frontend's labeled permit quick-pick structurally, including the post-2005 choice, and
+  accepts cutoff wording only when it is grammatically owned by the original-building permit fact;
+  arbitrary component nouns (including alarm panels), renovation, addition, sprinkler, and
+  equipment dates cannot select a governing code layer;
+- binds prefix, postfix, plural, chained, table, chapter, `§`, `Sec.`, edition, and Annex
+  citations to the same cited NFPA/IFC/IBC/IEBC book without crossing sentence or other-code
+  boundaries;
+- tracks edition intent per primary code family, including pre-2000, hyphenated, and mixed-edition
+  forms, so historical-only requests exclude current material while an explicit active side still
+  retains its Connecticut amendment layer; and
+- replaces stale BM25 generations instead of retaining a full corpus-sized index for every Chroma
+  store revision, with a lock preventing concurrent duplicate builds and eviction races.

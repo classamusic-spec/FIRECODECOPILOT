@@ -30,7 +30,7 @@ def test_retrieval_clears_stale_embedding_cache_and_retries_once(monkeypatch):
     monkeypatch.setattr(retriever.embeddings, "embed", lambda *_args, **_kwargs: [next(vectors)])
     monkeypatch.setattr(retriever.embed_cache, "clear", lambda: cleared.append(True))
     monkeypatch.setattr(retriever, "_verified_matches", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(retriever, "_merge_amendments", lambda chunks, _coll: chunks)
+    monkeypatch.setattr(retriever, "_merge_amendments", lambda chunks, *_args: chunks)
     monkeypatch.setattr(settings, "use_reranker", False)
     monkeypatch.setattr(settings, "use_hybrid", False)
     monkeypatch.setattr(settings, "parent_retrieval", False)

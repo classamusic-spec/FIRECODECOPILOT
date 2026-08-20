@@ -1,4 +1,6 @@
 """BM25 lexical channel: exact-token lookups (section numbers, standard names) rank first."""
+from concurrent.futures import ThreadPoolExecutor
+
 from app import lexical
 
 
@@ -102,3 +104,25 @@ def test_same_count_external_store_revision_rebuilds_metadata_index(monkeypatch)
     lexical._index_for(coll)
     lexical._index_for(coll)
     assert coll.get_calls == 2
+    assert len(lexical._cache) == 1
+
+
+def test_concurrent_first_reads_build_one_cache_generation(monkeypatch):
+    monkeypatch.setattr(lexical, "_store_revision", lambda: (1, 0))
+
+    class CountingColl(FakeColl):
+        name = "concurrent"
+
+        def __init__(self):
+            super().__init__(["NFPA 101 requirement"], [{"book": "NFPA 101"}])
+            self.get_calls = 0
+
+        def get(self, include=None):
+            self.get_calls += 1
+            return super().get(include=include)
+
+    coll = CountingColl()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _index: lexical._index_for(coll), range(4)))
+    assert coll.get_calls == 1
+    assert all(result is results[0] for result in results)

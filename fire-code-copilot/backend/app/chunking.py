@@ -124,6 +124,69 @@ def _strip_boilerplate(pages: list[tuple[int, str]]) -> list[tuple[int, str]]:
     return cleaned
 
 
+def _normalized_code_families(
+    pages: list[tuple[int, str]], book_meta: dict
+) -> dict[int, str]:
+    """Infer stable code-family metadata for adopted-code and amendment pages.
+
+    The Connecticut Fire Safety Code contains two different adopted model families in one PDF;
+    book-level metadata alone cannot distinguish Part III (IFC) from Part IV (NFPA 101).
+    """
+    label = f"{book_meta.get('book', '')} {book_meta.get('source', '')}".upper()
+    is_ct_building = bool(
+        "CT BUILDING CODE" in label
+        or "CONNECTICUT STATE BUILDING CODE" in label
+        or "CSBC" in label
+    )
+    current: str | None = None
+    if "FIRE SAFETY CODE" in label or "CSFSC" in label:
+        current = "ifc"
+    elif "FIRE PREVENTION CODE" in label or "CSFPC" in label:
+        current = "nfpa:1"
+    elif is_ct_building:
+        current = "ibc"
+    elif re.search(r"\bNFPA\s*101\b", label):
+        current = "nfpa:101"
+    elif re.search(r"\bNFPA\s*1(?!\d)\b", label):
+        current = "nfpa:1"
+    elif "INTERNATIONAL EXISTING BUILDING CODE" in label or re.search(r"\bIEBC\b", label):
+        current = "iebc"
+    elif "INTERNATIONAL BUILDING CODE" in label or re.search(r"\bIBC\b", label):
+        current = "ibc"
+    elif "INTERNATIONAL FIRE CODE" in label or re.search(r"\bIFC\b", label):
+        current = "ifc"
+
+    by_page: dict[int, str] = {}
+    for page, text in pages:
+        upper = re.sub(r"\s+", " ", text.upper())
+        if ("FIRE SAFETY CODE" in label or "CSFSC" in label) and re.search(
+            r"PART\s+IV\s*[-—]\s*EXISTING BUILDINGS/OCCUPANCIES AMENDMENTS.*NFPA\s*101",
+            upper,
+        ):
+            current = "nfpa:101"
+        elif is_ct_building:
+            head = upper[:700]
+            if "TABLE OF CONTENTS" in head[:150]:
+                if current:
+                    by_page[page] = current
+                continue
+            if "AMENDMENTS TO THE 2021 INTERNATIONAL EXISTING BUILDING CODE" in head:
+                current = "iebc"
+            elif ("AMENDMENTS TO THE 2021 INTERNATIONAL BUILDING CODE" in head
+                  and "INTERNATIONAL EXISTING BUILDING CODE" not in head):
+                current = "ibc"
+            elif re.search(
+                r"AMENDMENTS TO (?:ICC/ANSI|THE 2021 INTERNATIONAL "
+                r"(?:MECHANICAL|PLUMBING|ENERGY CONSERVATION|RESIDENTIAL|"
+                r"SWIMMING POOL AND SPA) CODE)",
+                head,
+            ):
+                current = None
+        if current:
+            by_page[page] = current
+    return by_page
+
+
 def chunk_pages(pages: list[tuple[int, str]], book_meta: dict) -> list[dict]:
     """pages: list of (page_number, page_text). book_meta: {book, edition, is_amendment_doc}.
 
@@ -132,6 +195,7 @@ def chunk_pages(pages: list[tuple[int, str]], book_meta: dict) -> list[dict]:
     """
     if not pages:
         return []
+    code_family_by_page = _normalized_code_families(pages, book_meta)
     pages = _strip_boilerplate(pages)
 
     # Flatten to (page, line) so we can look ahead (needed to tell a real section after a table
@@ -181,6 +245,8 @@ def chunk_pages(pages: list[tuple[int, str]], book_meta: dict) -> list[dict]:
                 "is_amendment": is_amd,
                 "is_table": cur_is_table,
             }
+            if code_family := code_family_by_page.get(cur_page):
+                meta["code_family"] = code_family
             if parent_id:
                 meta["parent_id"] = parent_id
                 meta["part"] = part_idx

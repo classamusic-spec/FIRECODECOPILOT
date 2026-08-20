@@ -13,7 +13,13 @@ from . import embeddings  # provider-agnostic embed(); see embeddings.py
 from . import embed_cache  # clears stale vectors when an embedding model/cache changed
 from . import lexical     # BM25 channel for exact-token matches
 from .sections import relates
-from .query import expand_query
+from .query import (
+    expand_query,
+    has_any_nonactive_primary_edition,
+    has_explicit_nonactive_primary_edition,
+    primary_edition_intents,
+    primary_family_allows_active,
+)
 
 
 def _client():
@@ -108,23 +114,34 @@ def retrieve_scored(query: str, *, collection: str | None = None,
             rankings.append(lexical.search(coll, expanded, settings.bm25_candidates))
 
     candidates = _fuse(rankings, settings.retrieve_before_rerank)
+    rerank_query = "\n".join(dict.fromkeys(expanded_queries))
+    candidates = _filter_mismatched_primary_editions(candidates, rerank_query)
+    historical_primary = has_explicit_nonactive_primary_edition(rerank_query)
+    any_historical_primary = has_any_nonactive_primary_edition(rerank_query)
 
     # Pull in the marshal's Verified Answer Library (confirmed answers) so they surface, labeled.
     # Filtered to THIS edition and distance-thresholded — a confirmed answer for a different
-    # question (or a different code cycle) must not masquerade as relevant.
-    verified = _verified_matches(query, primary_qvec, coll_name)
+    # question (or a different code cycle) must not masquerade as relevant. An explicitly requested
+    # historical/future primary-code edition is not the active collection and cannot use current
+    # verified precedents.
+    verified = ([] if any_historical_primary or primary_qvec is None
+                else _verified_matches(query, primary_qvec, coll_name))
 
     if settings.use_reranker:
         # The cross-encoder scores everything (verified + amendments + candidates) by true
         # relevance. Include every expanded/contextual variant: an original-permit year supplied
         # in building context can determine whether Part III/IFC or Part IV/NFPA 101 controls.
-        candidates = _merge_amendments(candidates, coll)
-        rerank_query = "\n".join(dict.fromkeys(expanded_queries))
+        if not historical_primary:
+            candidates = _merge_amendments(candidates, coll, rerank_query)
         # Add a small metadata-aware lexical slate for every routed base book. Dense similarity can
         # otherwise omit the named standard entirely when another code contains nearly identical
         # language. These are still reranked by topic; this is not an unconditional source filter.
         required = []
-        for family in _requested_code_families(rerank_query):
+        routed_families = [
+            family for family in _requested_code_families(rerank_query)
+            if primary_family_allows_active(rerank_query, family)
+        ]
+        for family in routed_families:
             phrase = _family_search_phrase(family)
             required.extend(lexical.search(coll, f"{phrase} {rerank_query}", 5))
             required.extend(_exact_model_book_candidates(coll, primary_qvec, family, 5))
@@ -140,7 +157,7 @@ def retrieve_scored(query: str, *, collection: str | None = None,
         # add their related amendments and any verified extras WITHOUT truncating them away.
         from .reranker import Scored
         kept = candidates[:settings.keep_after_rerank]
-        merged = _merge_amendments(kept, coll)
+        merged = kept if historical_primary else _merge_amendments(kept, coll, rerank_query)
         scored = [Scored(c, 0.0) for c in merged] + [Scored(v, 0.0) for v in verified]
 
     if settings.parent_retrieval:
@@ -212,9 +229,40 @@ def _dedupe_chunk_dicts(chunks: list[dict]) -> list[dict]:
     return out
 
 
-def _matches_base_family(scored, family: str) -> bool:
-    meta = scored.chunk.get("metadata", {}) or {}
-    if meta.get("is_amendment_doc"):
+def _filter_mismatched_primary_editions(chunks: list[dict], query: str) -> list[dict]:
+    """Remove provably wrong active-edition base chunks from explicit historical family requests."""
+    intents = primary_edition_intents(query)
+    historical_families = {
+        family: years for family, years in intents.items()
+        if years and "2021" not in years
+    }
+    if not historical_families:
+        return chunks
+    historical_only = has_explicit_nonactive_primary_edition(query)
+    kept = []
+    for chunk in chunks:
+        meta = chunk.get("metadata", {}) or {}
+        if historical_only and _is_amendment(meta):
+            continue
+        edition_match = re.search(r"\b(?:19|20)\d{2}\b", str(meta.get("edition", "")))
+        edition = edition_match.group(0) if edition_match else None
+        if edition and any(
+            _chunk_matches_base_family(chunk, family) and edition not in requested
+            for family, requested in historical_families.items()
+        ):
+            continue
+        kept.append(chunk)
+    return kept
+
+
+def _is_amendment(meta: dict) -> bool:
+    """Accept manifest input metadata and normalized metadata emitted by the chunker."""
+    return bool(meta.get("is_amendment") or meta.get("is_amendment_doc"))
+
+
+def _chunk_matches_base_family(chunk: dict, family: str) -> bool:
+    meta = chunk.get("metadata", {}) or {}
+    if _is_amendment(meta):
         return False
     label = f"{meta.get('book', '')} {meta.get('source', '')}".upper().replace("_", " ")
     if family.startswith("nfpa:"):
@@ -230,23 +278,53 @@ def _matches_base_family(scored, family: str) -> bool:
     return False
 
 
-def _matches_controlling_amendment(scored, family: str) -> bool:
-    meta = scored.chunk.get("metadata", {}) or {}
-    if not meta.get("is_amendment_doc"):
+def _matches_base_family(scored, family: str) -> bool:
+    return _chunk_matches_base_family(scored.chunk, family)
+
+
+def _chunk_matches_controlling_amendment(chunk: dict, family: str) -> bool:
+    meta = chunk.get("metadata", {}) or {}
+    if not _is_amendment(meta):
         return False
-    book = str(meta.get("book", "")).upper()
-    if family in ("nfpa:101", "ifc"):
-        return "CT FIRE SAFETY CODE" in book
+    normalized_family = str(meta.get("code_family", "")).lower()
+    label = f"{meta.get('book', '')} {meta.get('source', '')}".upper()
+    ct_provenance = bool(
+        "CONNECTICUT" in label
+        or re.search(r"\bCT\b", label)
+        or re.search(r"\bCS(?:FSC|FPC|BC)\b", label)
+    )
+    if normalized_family:
+        return ct_provenance and normalized_family == family
+
+    # Compatibility for older chunks only when the family is explicit in provenance. A generic
+    # CSFSC label is ambiguous because one PDF contains Part III/IFC and Part IV/NFPA 101.
+    if not ct_provenance:
+        return False
+    if family == "ifc":
+        return "PART III" in label or bool(re.search(r"\bIFC\b", label))
+    if family == "nfpa:101":
+        return "PART IV" in label or bool(re.search(r"\bNFPA\s*101\b", label))
     if family == "nfpa:1":
-        return "CT FIRE PREVENTION CODE" in book
-    if family in ("ibc", "iebc"):
-        return "CT BUILDING CODE" in book
+        return "CT FIRE PREVENTION CODE" in label or "CSFPC" in label
+    if family == "ibc":
+        return (bool(re.search(r"\bIBC\b", label))
+                or ("INTERNATIONAL BUILDING CODE" in label
+                    and "INTERNATIONAL EXISTING BUILDING CODE" not in label))
+    if family == "iebc":
+        return bool(re.search(r"\bIEBC\b", label)) or "INTERNATIONAL EXISTING BUILDING CODE" in label
     return False
+
+
+def _matches_controlling_amendment(scored, family: str) -> bool:
+    return _chunk_matches_controlling_amendment(scored.chunk, family)
 
 
 def _balance_code_families(scored: list, query: str, limit: int) -> list:
     """Keep required base books and Connecticut amendments in the final retrieval slate."""
-    families = _requested_code_families(query)
+    families = [
+        family for family in _requested_code_families(query)
+        if primary_family_allows_active(query, family)
+    ]
     if not families or not scored:
         return scored[:limit]
     bases = [next((s for s in scored if _matches_base_family(s, family)), None)
@@ -385,41 +463,53 @@ def _verified_lexical_fallback(query: str, vcoll, collection: str, k: int) -> li
     return [item for _score, item in sorted(scored, key=lambda x: x[0], reverse=True)[:k]]
 
 
-def _merge_amendments(chunks: list[dict], coll) -> list[dict]:
-    """For any base-model section that CT amended, pull in the amendment and mark it controlling.
+def _merge_amendments(chunks: list[dict], coll, query: str = "") -> list[dict]:
+    """For active base-code sections, pull in only that family's controlling CT amendments.
 
-    Relies on ingestion having tagged amendment chunks with {is_amendment: True, section: "<n>"}.
-    We match on section *relation*, not exact string equality, so an amendment to a parent
-    section (e.g. "903.2") still governs a retrieved child ("903.2.8"), and a newly-added CT
-    subsection ("903.2.8.4") surfaces for a query that retrieved its parent ("903.2.8"). This is
-    what makes the "CT version governs" rule robust to sub-section / range / formatting drift.
+    Family pairing matters as much as section pairing: many standards reuse the same section
+    numbers, so a section-only merge can attach an IFC amendment to an NFPA source. Explicitly
+    historical families are excluded while active sides of a mixed-edition query remain eligible.
     """
-    sections = {c["metadata"].get("section") for c in chunks if c["metadata"].get("section")}
-    sections.discard("(preamble)")          # not a real section — don't merge a doc title as an amendment
-    if not sections:
+    governed_families = ("nfpa:101", "nfpa:1", "ifc", "iebc", "ibc")
+    base_sections = {
+        (c["metadata"].get("section"), family)
+        for c in chunks
+        for family in governed_families
+        if c["metadata"].get("section") != "(preamble)"
+        and primary_family_allows_active(query, family)
+        and _chunk_matches_base_family(c, family)
+    }
+    if not base_sections:
         return chunks
 
-    # Fetch ALL amendment chunks once (they're a small subset — one amendment document), then
-    # match by hierarchy in Python. Chroma's `$in` can only do exact equality, which is the bug.
+    # Fetch all normalized amendment chunks once, then pair by family and section hierarchy.
     try:
         amd = coll.get(where={"is_amendment": True}, include=["documents", "metadatas"])
     except Exception:
-        return chunks  # ingestion may not have amendment tags yet
+        return chunks
 
     amendments = []
-    for d, m in zip(amd.get("documents", []) or [], amd.get("metadatas", []) or []):
-        amd_section = (m or {}).get("section")
-        if amd_section and any(relates(amd_section, s) for s in sections):
-            amendments.append(_format({**(m or {}), "controlling": True}, d))
+    for document, metadata in zip(
+        amd.get("documents", []) or [], amd.get("metadatas", []) or []
+    ):
+        amendment = _format(metadata or {}, document)
+        amd_section = amendment["metadata"].get("section")
+        if amd_section and any(
+            relates(amd_section, section)
+            and _chunk_matches_controlling_amendment(amendment, family)
+            for section, family in base_sections
+        ):
+            amendments.append(_format({**amendment["metadata"], "controlling": True}, document))
 
-    # Amendments first (controlling), then base chunks, de-duped by (section, page, is_amendment).
+    # Amendments first (controlling), then base chunks, de-duped by section/page/type.
     seen, merged = set(), []
-    for c in amendments + chunks:
-        key = (c["metadata"].get("section"), c["metadata"].get("page"), c["metadata"].get("is_amendment"))
+    for chunk in amendments + chunks:
+        meta = chunk["metadata"]
+        key = (meta.get("section"), meta.get("page"), meta.get("is_amendment"))
         if key in seen:
             continue
         seen.add(key)
-        merged.append(c)
+        merged.append(chunk)
     return merged
 
 
