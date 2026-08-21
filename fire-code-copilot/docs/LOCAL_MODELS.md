@@ -33,13 +33,48 @@ DEEP_PROVIDER=off
 
 | Role | Model | Notes |
 |---|---|---|
-| Generator A | `mlx-community/gemma-4-26b-a4b-it-4bit` | Default grounded answer generator. Thinking/reasoning must stay off. |
-| Generator B | `lmstudio-community/granite-4.0-h-small-MLX-4bit` | Co-equal runtime switch option. Uses the same endpoint; no server switch. |
+| Generator A (default) | `granite-4.0-h-small-MLX-8bit` | Balanced grounded-code generator and the default (`GENERATOR_MODEL`). ~33.5 GB. Thinking/reasoning must stay off. |
+| Generator B | `gemma-4-26b-a4b-it-4bit` | Lighter, responsive MoE generator (~4B active). ~15 GB. Runtime switch on the same endpoint; no server restart. |
+| Generator C | `Ornith-1.0-35B-bf16` | Largest option (~68.7 GB, unquantized bf16). Load only when its extra capacity is needed. |
 | Embedding | `BAAI/bge-m3` | Called through `/v1/embeddings`; vectors are normalized before Chroma writes/queries. |
 | Reranker | `BAAI/bge-reranker-v2-m3` | Called through `/v1/rerank`; keeps precision high after dense recall. |
 | Optional reranker | `Qwen/Qwen3-Reranker-4B` | Heavier option if you want to trade latency for rerank quality. |
 | Page OCR | `mlx-community/olmOCR-2-7B-1025-8bit` | Ingest-time OCR for scanned pages. |
 | Table OCR | `mlx-community/PaddleOCR-VL-8bit` | Optional and **off by default** because most questions do not require table OCR. |
+
+## How the generator lineup maps to the 2026 model landscape
+
+All three generators are 2026-era open models chosen for the local, citation-first answer
+path — not for coding-agent leaderboards. Note that the chat generator never searches the
+code books: BGE-M3 + the reranker do retrieval, and the generator only reasons over the
+already-retrieved chunks. So the generator is selected for **citation discipline,
+faithfulness, and speed on one workstation**, not context length or agentic prowess.
+
+- **Granite 4.0-H Small (default)** — IBM's Granite line is explicitly tuned for enterprise
+  RAG and grounded, low-hallucination generation, which is exactly this app's
+  citation-honesty requirement. Keeping the least flashy option as the default is
+  deliberate.
+- **Gemma 4 26B-A4B** — a mixture-of-experts model (~4B active per token), so it stays fast
+  and light (~15 GB) while following instructions well. The responsive pick for interactive
+  research.
+- **Ornith 1.0 35B** — a strong model, but it is post-trained for *self-scaffolding agentic
+  coding* (SWE-bench / Terminal-Bench), a different skill from single-shot grounded Q&A.
+  Treat it as the "extra capacity" option and watch for over-elaboration on simple cited
+  answers. Its bf16 footprint (~68.7 GB) is by far the heaviest here.
+
+Two models sometimes raised alongside these are intentionally **not** in the local catalog:
+
+- **Qwen3.6-27B** — a dense 27B (~16 GB at 4-bit) with strong grounding/citation discipline;
+  a reasonable future candidate to A/B against Granite on the answer path. Adding it means
+  appending its oMLX id to `GENERATOR_MODELS` (`.env`) and to `_MODEL_CATALOG` in
+  `backend/app/runtime_control.py`.
+- **MiniMax M2.7** — 229B total parameters; even as a sparse MoE it must hold all weights in
+  memory (~115 GB+ quantized), so it does not fit the single-workstation oMLX runtime and is
+  out of scope for local use.
+
+Whichever generator is active, the real decider is `python -m app.eval --judge`, which scores
+faithfulness and citation-honesty on fire-code questions — that, not a coding benchmark, is
+how to rank these for this tool.
 
 ## Answer-path rules
 
