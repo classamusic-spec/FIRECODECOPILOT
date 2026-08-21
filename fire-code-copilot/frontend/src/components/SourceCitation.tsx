@@ -110,9 +110,11 @@ export default function SourceCitation({ source, index, highlight }: Props) {
       >
         <ChevronIcon className={"shrink-0 text-steel-500 transition-transform " + (open ? "rotate-90" : "")} />
         <span className="shrink-0 font-mono text-xs text-steel-500">[{index}]</span>
-        <span className="truncate font-medium text-steel-100">{referenceLine(meta)}</span>
+        <span className="min-w-0 flex-1 truncate font-medium text-steel-100">{referenceLine(meta)}</span>
 
-        {/* Status badges, pushed to the right. */}
+        {/* Status badges, pushed to the right. The citation itself outranks its badges: the
+            amendment badge abbreviates below `sm` so a long label can't truncate the section
+            reference down to an unreadable stub on a narrow window. */}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {meta.is_table && (
             <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-steel-300">Table</span>
@@ -121,8 +123,12 @@ export default function SourceCitation({ source, index, highlight }: Props) {
             <span className="rounded-full border border-verified-500/30 bg-verified-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-verified-700">Verified</span>
           )}
           {isAmendment && (
-            <span className="rounded-full bg-coral-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-glow-sm">
-              CT Amendment · controlling
+            <span
+              title="Connecticut amendment — controlling"
+              className="rounded-full bg-coral-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-glow-sm"
+            >
+              <span className="sm:hidden">CT Amd</span>
+              <span className="hidden sm:inline">CT Amendment · controlling</span>
             </span>
           )}
         </span>

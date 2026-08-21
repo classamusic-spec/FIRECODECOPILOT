@@ -538,23 +538,29 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col">
       {/* ----------------------------------------------------------- Header */}
       <header className="sticky top-0 z-20 border-b border-white/10 bg-navy-950/70 backdrop-blur-xl">
-        <div className="mx-auto w-full max-w-6xl px-5 py-3">
+        <div className="mx-auto w-full max-w-6xl px-3 py-3 sm:px-5">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-navy-800 text-coral-500 shadow-glow-sm ring-1 ring-white/10">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-navy-800 text-coral-500 shadow-glow-sm ring-1 ring-white/10">
                 <BrandMark className="h-6 w-6" />
               </span>
-              <div className="leading-tight">
-                <h1 className="text-[15px] font-semibold tracking-tight text-white">
+              <div className="min-w-0 leading-tight">
+                {/* The wordmark never truncates — the controls give up their labels first. */}
+                <h1 className="whitespace-nowrap text-[15px] font-semibold tracking-tight text-white">
                   Fire Code <span className="text-coral-400">CoPilot</span>
                 </h1>
-                <p className="text-xs text-steel-400">
+                {/* Truncates instead of wrapping: a long jurisdiction string used to stack into a
+                    ragged column on narrow screens and triple the header's height. Hidden on the
+                    smallest widths, where the controls need the room more than the subtitle does. */}
+                <p className="hidden truncate text-xs text-steel-400 sm:block">
                   {health?.jurisdiction ?? "Hartford, Connecticut"} · decision support
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* shrink-0 so the controls keep their full size and the brand truncates instead —
+                without it the pills overlapped the wordmark on a phone-width window. */}
+            <div className="flex shrink-0 items-center justify-end gap-2">
               {/* New chat — save the current conversation and start a fresh one.
                   Hidden in demo mode (persistence is off there). */}
               {!DEMO && (
@@ -605,18 +611,22 @@ export default function App() {
                 className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-steel-300 transition-colors hover:border-coral-500/40 hover:bg-white/[0.07] hover:text-steel-100"
               >
                 <ListIcon className="h-3.5 w-3.5" />
-                Review
+                <span className="hidden sm:inline">Review</span>
               </button>
 
               {/* Code-edition selector — search a legacy cycle for existing-building
                   questions. Only shown when the backend exposes ≥2 collections. */}
+              {/* Hidden on phone widths — the pill is wide and the runtime chip and Library
+                  take priority there. The active edition is still shown in "Adopted editions". */}
               {showEditionSelector && (
-                <EditionSelector
-                  collections={collections}
-                  selected={selectedCollection}
-                  onChange={setSelectedCollection}
-                  label={editionLabel}
-                />
+                <div className="hidden lg:block">
+                  <EditionSelector
+                    collections={collections}
+                    selected={selectedCollection}
+                    onChange={setSelectedCollection}
+                    label={editionLabel}
+                  />
+                </div>
               )}
 
               <div
@@ -626,18 +636,20 @@ export default function App() {
                 aria-label={`${providerLabel}${activeGenerator ? `, ${shortModel(activeGenerator)}` : ""}`}
               >
                 <span className={"h-1.5 w-1.5 shrink-0 rounded-full " + (engineState === "online" ? "bg-verified-500 shadow-[0_0_8px] shadow-verified-500/70" : engineState === "offline" ? "bg-critical-600" : "bg-steel-500 animate-blink")} />
-                <span className="text-[11px] font-medium text-steel-200 md:hidden">{engineState === "online" ? "Local" : engineState === "checking" ? "Checking" : "Offline"}</span>
-                <span className="hidden text-xs font-medium text-steel-200 md:inline">{providerLabel}</span>
+                {/* Below sm the status dot alone carries engine state, so the model id keeps its
+                    tap target instead of the chip pushing the wordmark out of the header. */}
+                <span className="hidden text-[11px] font-medium text-steel-200 sm:inline lg:hidden">{engineState === "online" ? "Local" : engineState === "checking" ? "Checking" : "Offline"}</span>
+                <span className="hidden text-xs font-medium text-steel-200 lg:inline">{providerLabel}</span>
                 <button
                   type="button"
                   onClick={() => setRuntimeOpen(true)}
-                  className="max-w-[104px] truncate rounded-md px-1 font-mono text-[10px] text-steel-300 transition hover:bg-white/[0.06] hover:text-steel-100 focus:outline-none sm:max-w-[190px] sm:text-[11px]"
+                  className="max-w-[68px] truncate rounded-md px-1 font-mono text-[10px] text-steel-300 transition hover:bg-white/[0.06] hover:text-steel-100 focus:outline-none sm:max-w-[190px] sm:text-[11px]"
                   aria-label="Open local model picker"
                   title={activeGenerator ? `Open model picker (active: ${shortModel(activeGenerator)})` : "Open model picker"}
                 >
                   {activeGenerator ? shortModel(activeGenerator) : "Choose model"}
                 </button>
-                {engineState === "online" && <span className="hidden rounded-full border border-verified-500/20 bg-verified-500/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-verified-700 sm:inline-flex">grounded</span>}
+                {engineState === "online" && <span className="hidden rounded-full border border-verified-500/20 bg-verified-500/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-verified-700 xl:inline-flex">grounded</span>}
               </div>
             </div>
           </div>
@@ -656,7 +668,9 @@ export default function App() {
 
       {/* ------------------------------------------------------- Message log */}
       <main ref={logRef} onScroll={onLogScroll} className="scroll-thin flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl space-y-5 px-4 py-6">
+        {/* max-w-3xl + px-4 gives a 736px inner column — the exact width of the answer card's
+            `max-w-prose`, so messages and the composer below share one aligned reading column. */}
+        <div className={"mx-auto flex w-full max-w-3xl flex-col space-y-5 px-4 py-6" + (turns.length === 0 ? " min-h-full justify-center" : "")}>
           {turns.length === 0 ? (
             <EmptyState onPick={(ex) => { setDraft(ex); textareaRef.current?.focus(); }} />
           ) : (
@@ -680,7 +694,7 @@ export default function App() {
           </button>
         )}
 
-        <div className="mx-auto w-full max-w-5xl px-5 py-4">
+        <div className="mx-auto w-full max-w-3xl px-4 py-4">
           {/* Off-active-edition notice — makes it obvious the answers won't come from
               the currently adopted cycle (the system prompt already warns not to blend). */}
           {legacyCollection && (
@@ -727,7 +741,9 @@ export default function App() {
               onChange={(e) => { setDraft(e.target.value); autosize(e.currentTarget); }}
               onKeyDown={onKeyDown}
               rows={1}
-              placeholder="Ask a code question…  (Enter to send · Shift+Enter for a new line)"
+              // Short placeholder: the long "(Enter to send…)" hint used to wrap and get clipped by
+              // the input's min-height on narrow screens. The hint now lives in the helper row below.
+              placeholder="Ask a code question…"
               className="scroll-thin max-h-40 min-h-[2.75rem] w-full resize-none bg-transparent px-2.5 py-2.5 text-[15px] leading-relaxed text-steel-100 placeholder:text-steel-500 focus:outline-none"
             />
             {/* ⌘K hint — muted, hidden on small screens. */}
@@ -757,13 +773,18 @@ export default function App() {
             )}
           </div>
 
-          {/* Compact privacy cue — generator selection lives in the top runtime bar. */}
+          {/* Compact privacy cue — generator selection lives in the top runtime bar. The send hint
+              sits here (right-aligned on wider screens) rather than inside the placeholder. */}
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-steel-500">
             <span className="font-medium text-steel-400">Local-only workspace</span>
             <span aria-hidden="true">·</span>
             <span>sources stay on this workstation</span>
             <span aria-hidden="true">·</span>
             <span>thinking off</span>
+            <span className="ml-auto hidden sm:inline">
+              <kbd className="font-mono text-steel-400">Enter</kbd> to send ·{" "}
+              <kbd className="font-mono text-steel-400">Shift+Enter</kbd> for a new line
+            </span>
           </div>
         </div>
       </footer>
@@ -980,7 +1001,9 @@ function EmptyState({ onPick }: { onPick: (ex: string) => void }) {
     "Does the CT amendment change fire-rated corridor requirements?",
   ];
   return (
-    <div className="mx-auto mt-10 max-w-prose text-center animate-rise">
+    // No top margin: the log centers this block vertically when the conversation is empty,
+    // instead of stranding it in the upper third with a large void underneath.
+    <div className="mx-auto w-full max-w-prose text-center animate-rise">
       <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-navy-800 text-coral-500 shadow-glow ring-1 ring-white/10 animate-glowpulse">
         <BrandMark className="h-9 w-9" />
       </div>
@@ -997,10 +1020,12 @@ function EmptyState({ onPick }: { onPick: (ex: string) => void }) {
             key={ex}
             type="button"
             onClick={() => onPick(ex)}
-            className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-sm text-steel-300 transition active:scale-[0.98] hover:border-coral-500/40 hover:bg-white/[0.06] hover:text-steel-100"
+            className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-left text-sm text-steel-300 transition active:scale-[0.98] hover:border-coral-500/40 hover:bg-white/[0.06] hover:text-steel-100"
           >
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-coral-500/70 transition group-hover:bg-coral-400" />
-            {ex}
+            {/* Explicit span + text-left: as a bare flex child the wrapped second line inherited
+                the parent's `text-center` and rendered ragged inside the chip. */}
+            <span className="text-left">{ex}</span>
           </button>
         ))}
       </div>
